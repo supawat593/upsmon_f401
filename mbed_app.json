@@ -1,0 +1,47 @@
+{
+    "target_overrides":{
+        "*":{
+            "rtos.main-thread-stack-size":"0x0800",
+            "platform.stdio-baud-rate": 115200,
+            "platform.callback-nontrivial": true,
+            "platform.stdio-convert-newlines":true,
+            "target.tickless-from-us-ticker":false,
+            "target.printf_lib":"std",
+            "target.device_has_add":["USBDEVICE"],
+            "target.features_add":["STORAGE"],
+            "target.components_add":["SPIF","FLASHIAP"]
+        },
+        "K22F":{
+            "target.bootloader_supported":true,
+            "target.bootloader_img":"C:\\Users\\supawat\\Mbed Programs\\k22f_bootloader\\upsmon_lte_0x19000_bootloader.bin",
+            "target.app_offset":"0x19000",
+            "spif-driver.SPI_FREQ":"16000000",
+            "spif-driver.SPI_MOSI":"PTD6",
+            "spif-driver.SPI_MISO":"PTD7",
+            "spif-driver.SPI_CLK":"PTD5",
+            "spif-driver.SPI_CS":"PTD0"
+        },
+        "LPC1768":{
+            "target.bootloader_supported":true,
+            "target.bootloader_img":"../mbed_os_bootloader_upsmon/BUILD/LPC1768/ARMC6/mbed_os_bootloader_upsmon.bin",
+            "target.app_offset":"0x18000",
+            "spif-driver.SPI_FREQ":"16000000",
+            "spif-driver.SPI_MOSI":"P0_9",
+            "spif-driver.SPI_MISO":"P0_8",
+            "spif-driver.SPI_CLK":"P0_7",
+            "spif-driver.SPI_CS":"P0_6",
+            "flashiap-block-device.base-address": "0x078000",
+            "flashiap-block-device.size": "0x8000"
+        },
+        "NUCLEO_F401RE":{        
+            "target.bootloader_supported":true,
+            "target.bootloader_img":"../bootloader_f401re/BUILD/NUCLEO_F401RE/ARMC6/bootloader_f401re.bin",
+            "target.app_offset":"0x20000",
+            "spif-driver.SPI_FREQ":"32000000",
+            "spif-driver.SPI_MOSI":"PB_5",
+            "spif-driver.SPI_MISO":"PB_4",
+            "spif-driver.SPI_CLK":"PB_3",
+            "spif-driver.SPI_CS":"PB_10"
+        }
+    }
+}
