@@ -33,9 +33,56 @@ void Sim7600Cellular::printHEX(unsigned char *msg, unsigned int len) {
   printf("\r\n----------------------------------------------------------------"
          "\r\n");
 }
+bool Sim7600Cellular::check_at_ready() {
+  //   _atc->debug_on(1);
+  //   _atc->set_timeout(12000);
+  int ret = 0;
+  debug("wait for *ATREADY\r\n");
+
+  if (!_atc->scanf("*ATREADY: %d", &ret)) {
+    debug("*ATREADY Receiving fail!!!\r\n");
+  }
+
+  //   _atc->debug_on(0);
+  //   _atc->set_timeout(8000);
+  //   _atc->flush();
+  return (ret == 1) ? true : false;
+}
+
+void Sim7600Cellular::get_ati(char *ati_retmsg) {
+  char buffer[160] = {0};
+  //   _atc->debug_on(1);
+  _atc->set_timeout(250);
+  _atc->send("ATI");
+  _atc->read(buffer, 160);
+
+  int st = 0;
+  while ((strncmp(&buffer[st], "Manufacturer: ", 14) != 0) && (st < 146)) {
+    st++;
+  }
+
+  int end = 0;
+  while ((strncmp(&buffer[end], "\r\n\r\nOK", 6) != 0) && (end < 154)) {
+    end++;
+  }
+
+  //   char substr[end - st];
+  //   memset(substr, 0, end - st);
+  //   memcpy(&substr, &buffer[st], end - st);
+  memcpy(ati_retmsg, &buffer[st], end - st);
+
+  //   debug("\r\n------ ATI Return mesg. "
+  //         "------\r\n%s\r\n------------------------------\r\n\r\n",
+  //         substr);
+
+  //   _atc->debug_on(0);
+  _atc->set_timeout(8000);
+  _atc->flush();
+}
 
 bool Sim7600Cellular::check_modem_status(int rty) {
   bool bAT_OK = false;
+  //   _atc->debug_on(1);
   _atc->set_timeout(1000);
 
   for (int i = 0; (!bAT_OK) && (i < rty); i++) {
@@ -52,7 +99,10 @@ bool Sim7600Cellular::check_modem_status(int rty) {
     }
   }
 
+  //   _atc->debug_on(0);
   _atc->set_timeout(8000);
+  _atc->flush();
+
   return bAT_OK;
 }
 
@@ -487,6 +537,11 @@ int Sim7600Cellular::ping_dstNW(char *dst, int nrty, int p_size,
 
     return 9999;
   }
+}
+
+bool Sim7600Cellular::delete_allsms() {
+  debug("delete all sms\r\n");
+  return _atc->send("AT+CMGD=1,4") && _atc->recv("OK");
 }
 
 bool Sim7600Cellular::mqtt_start() {

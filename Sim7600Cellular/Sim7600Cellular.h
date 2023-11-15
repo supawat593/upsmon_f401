@@ -9,6 +9,8 @@ public:
   Sim7600Cellular(ATCmdParser *_parser);
   Sim7600Cellular(BufferedSerial *_serial);
   Sim7600Cellular(PinName tx, PinName rx);
+  bool check_at_ready();
+  void get_ati(char *ati_retmsg);
   bool check_modem_status(int rty = 20);
   bool enable_echo(bool en);
   bool save_setting();
@@ -44,6 +46,8 @@ public:
   int set_tz_update(int en);
   int dns_resolve(char *src, char *dst);
   int ping_dstNW(char *dst, int nrty = 4, int p_size = 64, int dest_type = 1);
+
+  bool delete_allsms();
 
   bool mqtt_start();
   bool mqtt_stop();

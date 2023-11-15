@@ -30,7 +30,7 @@ bool CellularService::MDM_HW_reset(void) {
   mdm_rst = 0;
   ThisThread::sleep_for(100ms);
   mdm_rst = 1; // Active LOW
-  ThisThread::sleep_for(400ms);
+  ThisThread::sleep_for(3000ms);
   mdm_rst = 0;
   // wait_ms(200);
   return true;

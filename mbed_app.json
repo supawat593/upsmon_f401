@@ -34,7 +34,7 @@
         },
         "NUCLEO_F401RE":{        
             "target.bootloader_supported":true,
-            "target.lse_available":0,
+            "target.lse_available":1,
             "target.device_has_add":["USBDEVICE"],
             "target.bootloader_img":"../bootloader_f401re/BUILD/NUCLEO_F401RE/ARMC6/bootloader_f401re.bin",
             "target.app_offset":"0x20000",
@@ -43,8 +43,8 @@
             "spif-driver.SPI_MISO":"PC_11",
             "spif-driver.SPI_CLK":"PC_10",
             "spif-driver.SPI_CS":"PA_15",
-            "flashiap-block-device.base-address": "0x801C000",
-            "flashiap-block-device.size": "0x4000"
+            "flashiap-block-device.base-address": "0x8060000",
+            "flashiap-block-device.size": "0x20000"
         }
     }
 }

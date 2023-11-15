@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 
 #include "./TimerTPL5010/TimerTPL5010.h"
 // #include "USBSerial.h"
@@ -41,7 +42,8 @@ ATCmdParser *xtc232;
 
 DigitalOut vrf_en(MDM_VRF_EN_PIN);
 DigitalOut mdm_rst(MDM_RST_PIN);
-DigitalOut mdm_pwr(MDM_PWR_PIN, 1);
+// DigitalOut mdm_pwr(MDM_PWR_PIN, 1);
+DigitalOut mdm_pwr(MDM_PWR_PIN, 0);
 DigitalOut mdm_flight(MDM_FLIGHT_PIN);
 DigitalIn mdm_status(MDM_STATUS_PIN);
 
@@ -83,6 +85,7 @@ Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
 EventQueue isr_queue;
 
 init_script_t init_script, iap_init_script;
+unique_stat_t mydata;
 
 unsigned int *uid = (unsigned int *)0x801bffc;
 
@@ -195,7 +198,8 @@ void capture_thread_routine() {
       strcpy(mail->cmd, str_cmd[j]);
       // strcpy(mail->resp, dummy_msg);
       xtc232->flush();
-      xtc232->send(mail->cmd);
+      //   xtc232->send(mail->cmd);
+      debug_if(xtc232->send(mail->cmd), "send command: %s\r\n", mail->cmd);
 
       //   read_xtc_to_char(ret_rs232, 128, '\r');
       read_xparser_to_char(ret_rs232, 128, '\r', xtc232);
@@ -228,6 +232,7 @@ void capture_thread_routine() {
         mail_box.put(mail);
 
       } else {
+        debug("command: %s [NO RESP.]\r\n", mail->cmd);
         mail_box.free(mail);
       }
     }
@@ -388,11 +393,12 @@ int main() {
   period_min = (read_dipsw() < 1) ? 1 : read_dipsw();
 
   printf("\r\n\n----------------------------------------\r\n");
-  printf("| Hello,I am UPSMON_LPC1768_SIM7600E-H |\r\n");
+  printf("| Hello,I am UPSMON_STM32F401RE_A7672E |\r\n");
   printf("----------------------------------------\r\n");
   printf("Firmware Version: %s" CRLF, firmware_vers);
   printf("SystemCoreClock : %.3f MHz.\r\n", SystemCoreClock / 1000000.0);
-  printf("timestamp : %d\r\n", (unsigned int)rtc_read());
+  //   printf("timestamp : %d\r\n", (unsigned int)rtc_read());
+  printf("timestamp : %d\r\n", (unsigned int)time(NULL));
   printf("capture period : %d minutes\r\n", period_min);
 
   char sn[12];
@@ -402,6 +408,7 @@ int main() {
 
   ext.init();
   ext.read_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
+
   //   initial_FlashIAPBlockDevice(&iap);
 
   //   iap_to_script(&iap, &iap_init_script);
@@ -412,6 +419,14 @@ int main() {
   //     printf("topic: %s\r\n", iap_init_script.topic_path);
   //     // printHEX((unsigned char *)&iap_init_script, sizeof(init_script_t));
   //   }
+
+  //   unique_stat_t *xbuffer = (unique_stat_t *)malloc(sizeof(unique_stat_t));
+  //   iap.read(xbuffer, iap_script_offset, sizeof(unique_stat_t));
+  //   memcpy(&mydata, xbuffer, sizeof(init_script_t));
+  //   printHEX((unsigned char *)xbuffer, sizeof(unique_stat_t));
+  //   //   if (mydata.uid)
+  //   printf("uid: %d\r\n", mydata.uid);
+  //   free(xbuffer);
 
   isr_thread.start(callback(&isr_queue, &EventQueue::dispatch_forever));
   tpl5010.init(&isr_queue);
@@ -430,6 +445,13 @@ int main() {
   ThisThread::sleep_for(500ms);
 
   modem->vrf_enable(1);
+
+  mdm_pwr = 1;
+  ThisThread::sleep_for(100ms);
+  mdm_pwr = 0;
+  debug("powerkey triggering!!!\r\n");
+  //   ThisThread::sleep_for(8s);
+
   modem->ctrl_timer(1);
   int sys_time_ms = modem->read_systime_ms();
 
@@ -442,12 +464,27 @@ int main() {
 
   sys_time_ms = modem->read_systime_ms();
   modem->ctrl_timer(0);
-  modem->check_modem_status(3) ? netstat_led(IDLE) : netstat_led(OFF);
+
+  //   modem->check_at_ready();
+  //   modem->check_modem_status(3) ? netstat_led(IDLE) : netstat_led(OFF);
+  modem->check_at_ready() ? netstat_led(IDLE) : netstat_led(OFF);
+  //   debug("read ati\r\n");
+  //   modem->read_ati();
 
   last_rtc_check_NW = (unsigned int)rtc_read();
   if (ext.get_script_flag() && modem->initial_NW()) {
     netstat_led(CONNECTED);
   }
+
+  //   debug("read ati\r\n");
+  char msg_ati[128] = {0};
+  modem->get_ati(msg_ati);
+  debug_if(strlen(msg_ati) > 0,
+           "\r\n------ ATI Return mesg. "
+           "------\r\n%s\r\n------------------------------\r\n\r\n",
+           msg_ati);
+
+  debug_if(modem->delete_allsms(), "delete all sms complete...\r\n");
 
   modem->ntp_setup();
 
@@ -566,6 +603,13 @@ int main() {
           ThisThread::sleep_for(500ms);
           //   vrf_en = 1;
           modem->vrf_enable(1);
+
+          //********* powerkey
+          mdm_pwr = 1;
+          ThisThread::sleep_for(100ms);
+          mdm_pwr = 0;
+          //********* powerkey
+
           bmqtt_start = false;
           bmqtt_cnt = false;
           bmqtt_sub = false;
@@ -691,6 +735,8 @@ int main() {
                          ((unsigned int)rtc_read() - rtc_uptime < 18))
                     ;
 
+                  modem->check_at_ready();
+
                   if (modem->check_modem_status(10)) {
                     printf("Restart Modem Complete : AT Ready!!!" CRLF);
                     modem->set_cops();
@@ -732,6 +778,8 @@ int main() {
             while (mdm_status.read() &&
                    ((unsigned int)rtc_read() - rtc_uptime < 18))
               ;
+
+            modem->check_at_ready();
 
             if (modem->check_modem_status(10)) {
               printf("Restart Modem Complete : AT Ready!!!" CRLF);

@@ -58,4 +58,10 @@ typedef struct {
   mqttsub_notify_t mqttsub;
 } oob_notify_t;
 
+typedef struct {
+  unsigned int uid;
+  char usr[32];
+  char pwd[32];
+} unique_stat_t;
+
 #endif
