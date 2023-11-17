@@ -76,7 +76,7 @@
 
 #endif
 
-#define firmware_vers "660305"
+#define firmware_vers "661115"
 #define Dev_Group "LTE"
 
 #define INITIAL_APP_FILE "initial_script.txt"

@@ -43,7 +43,7 @@ ATCmdParser *xtc232;
 DigitalOut vrf_en(MDM_VRF_EN_PIN);
 DigitalOut mdm_rst(MDM_RST_PIN);
 // DigitalOut mdm_pwr(MDM_PWR_PIN, 1);
-DigitalOut mdm_pwr(MDM_PWR_PIN, 0);
+DigitalOut mdm_pwr(MDM_PWR_PIN);
 DigitalOut mdm_flight(MDM_FLIGHT_PIN);
 DigitalIn mdm_status(MDM_STATUS_PIN);
 
@@ -439,18 +439,20 @@ int main() {
   }
 
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
-  modem = new CellularService(_parser, vrf_en, mdm_rst);
+  //   modem = new CellularService(_parser, vrf_en, mdm_rst);
+  modem = new CellularService(_parser, mdm_pwr, mdm_rst);
 
   xtc232 = new ATCmdParser(&rs232, "\r", 256, 1000);
   ThisThread::sleep_for(500ms);
 
-  modem->vrf_enable(1);
+  vrf_en = 1;
 
-  mdm_pwr = 1;
-  ThisThread::sleep_for(100ms);
-  mdm_pwr = 0;
-  debug("powerkey triggering!!!\r\n");
+  //   mdm_pwr = 1;
+  //   ThisThread::sleep_for(100ms);
+  //   mdm_pwr = 0;
+  //   debug("powerkey triggering!!!\r\n");
   //   ThisThread::sleep_for(8s);
+  modem->powerkey_trig_mode(1);
 
   modem->ctrl_timer(1);
   int sys_time_ms = modem->read_systime_ms();
@@ -599,15 +601,16 @@ int main() {
         if (!modem->check_modem_status(10)) {
           netstat_led(OFF);
           //   vrf_en = 0;
-          modem->vrf_enable(0);
+          vrf_en = 0;
           ThisThread::sleep_for(500ms);
           //   vrf_en = 1;
-          modem->vrf_enable(1);
+          vrf_en = 1;
 
           //********* powerkey
-          mdm_pwr = 1;
-          ThisThread::sleep_for(100ms);
-          mdm_pwr = 0;
+          //   mdm_pwr = 1;
+          //   ThisThread::sleep_for(100ms);
+          //   mdm_pwr = 0;
+          modem->powerkey_trig_mode(1);
           //********* powerkey
 
           bmqtt_start = false;
@@ -625,8 +628,9 @@ int main() {
                    (unsigned int)rtc_read() - rtc_uptime);
             rtc_uptime = (unsigned int)rtc_read();
           }
-
-          mdmOK = modem->check_modem_status();
+          //   modem->check_at_ready();
+          //   mdmOK = modem->check_modem_status();
+          mdmOK = modem->check_at_ready() && modem->check_modem_status();
 
           if (mdmOK) {
             printf("Power re-attached -> SIM7600 Status: Ready\r\n");
@@ -727,20 +731,46 @@ int main() {
 
                   bmqtt_start = false;
                   netstat_led(OFF);
-                  modem->MDM_HW_reset();
-                  printf("MQTT Stop Fail: Rebooting Modem!!!" CRLF);
+                  //   modem->MDM_HW_reset();
+                  //   printf("MQTT Stop Fail: Rebooting Modem!!!" CRLF);
 
-                  rtc_uptime = (unsigned int)rtc_read();
-                  while (mdm_status.read() &&
-                         ((unsigned int)rtc_read() - rtc_uptime < 18))
-                    ;
+                  //   rtc_uptime = (unsigned int)rtc_read();
+                  //   while (mdm_status.read() &&
+                  //          ((unsigned int)rtc_read() - rtc_uptime < 18))
+                  //     ;
 
-                  modem->check_at_ready();
+                  //   modem->check_at_ready();
+
+                  if ((!modem->check_modem_status(3)) && (!mdm_status.read())) {
+                    modem->MDM_HW_reset();
+
+                    printf("NW Attaching Fail: Rebooting Modem!!!" CRLF);
+
+                    rtc_uptime = (unsigned int)rtc_read();
+                    while (mdm_status.read() &&
+                           ((unsigned int)rtc_read() - rtc_uptime < 18))
+                      ;
+
+                    modem->check_at_ready();
+                  }
 
                   if (modem->check_modem_status(10)) {
-                    printf("Restart Modem Complete : AT Ready!!!" CRLF);
-                    modem->set_cops();
-                    modem->set_full_FUNCTION();
+                    // printf("Restart Modem Complete : AT Ready!!!" CRLF);
+
+                    // debug_if(modem->get_cfun_mode() < 0,
+                    //          "Checking CFUN Mode has Fail!\r\n");
+                    // modem->set_cops();
+                    // modem->set_full_FUNCTION();
+
+                    if (modem->get_cfun_mode() == 1) {
+                      //   modem->initial_NW();
+                      modem->set_min_cFunction();
+                      modem->set_full_FUNCTION();
+                    } else {
+                      modem->set_cops();
+                      modem->set_full_FUNCTION();
+                    }
+
                     // modem->set_creg(2);
                     // modem->set_cereg(2);
                     netstat_led(IDLE);
@@ -770,21 +800,46 @@ int main() {
             // mdm_rst = 1;
             // ThisThread::sleep_for(500ms);
             // mdm_rst = 0;
-            modem->MDM_HW_reset();
+            // modem->MDM_HW_reset();
 
-            printf("NW Attaching Fail: Rebooting Modem!!!" CRLF);
+            // printf("NW Attaching Fail: Rebooting Modem!!!" CRLF);
 
-            rtc_uptime = (unsigned int)rtc_read();
-            while (mdm_status.read() &&
-                   ((unsigned int)rtc_read() - rtc_uptime < 18))
-              ;
+            // rtc_uptime = (unsigned int)rtc_read();
+            // while (mdm_status.read() &&
+            //        ((unsigned int)rtc_read() - rtc_uptime < 18))
+            //   ;
 
-            modem->check_at_ready();
+            // modem->check_at_ready();
+
+            if ((!modem->check_modem_status(3)) && (!mdm_status.read())) {
+              modem->MDM_HW_reset();
+
+              printf("NW Attaching Fail: Rebooting Modem!!!" CRLF);
+
+              rtc_uptime = (unsigned int)rtc_read();
+              while (mdm_status.read() &&
+                     ((unsigned int)rtc_read() - rtc_uptime < 18))
+                ;
+
+              modem->check_at_ready();
+            }
 
             if (modem->check_modem_status(10)) {
-              printf("Restart Modem Complete : AT Ready!!!" CRLF);
-              modem->set_cops();
-              modem->set_full_FUNCTION();
+              //   printf("Restart Modem Complete : AT Ready!!!" CRLF);
+
+              //   debug_if(modem->get_cfun_mode() < 0,
+              //            "Checking CFUN Mode has Fail!\r\n");
+              //   modem->set_cops();
+              //   modem->set_full_FUNCTION();
+
+              if (modem->get_cfun_mode() == 1) {
+                // modem->initial_NW();
+                modem->set_min_cFunction();
+                modem->set_full_FUNCTION();
+              } else {
+                modem->set_cops();
+                modem->set_full_FUNCTION();
+              }
               //   modem->set_creg(2);
               //   modem->set_cereg(2);
               netstat_led(IDLE);

@@ -8,11 +8,16 @@ class CellularService : public Sim7600Cellular {
 public:
   cellular_data_t cell_info;
 
-  CellularService(PinName tx, PinName rx, DigitalOut &en, DigitalOut &rst);
-  CellularService(BufferedSerial *_serial, DigitalOut &en, DigitalOut &rst);
-  CellularService(ATCmdParser *_parser, DigitalOut &en, DigitalOut &rst);
-  void vrf_enable(bool en = false);
-  bool MDM_HW_reset(void);
+  //   CellularService(PinName tx, PinName rx, DigitalOut &en, DigitalOut &rst);
+  //   CellularService(BufferedSerial *_serial, DigitalOut &en, DigitalOut
+  //   &rst); CellularService(ATCmdParser *_parser, DigitalOut &en, DigitalOut
+  //   &rst);
+  CellularService(PinName tx, PinName rx, DigitalOut &pwrkey, DigitalOut &rst);
+  CellularService(BufferedSerial *_serial, DigitalOut &pwrkey, DigitalOut &rst);
+  CellularService(ATCmdParser *_parser, DigitalOut &pwrkey, DigitalOut &rst);
+  //   void vrf_enable(bool en = false);
+  void powerkey_trig_mode(bool en = true);
+  void MDM_HW_reset(void);
   bool initial_NW();
   // srv= time1.google.com --> ipaddr= 216.239.35.0
   void ntp_setup(const char *srv = "time1.google.com", int tz_q = 28);
@@ -23,7 +28,8 @@ public:
 
 private:
   Timer tm1;
-  DigitalOut &vrf_en;
+  //   DigitalOut &vrf_en;
+  DigitalOut &mdm_pwr;
   DigitalOut &mdm_rst;
 
   struct tm struct_tm;

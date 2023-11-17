@@ -152,15 +152,45 @@ bool Sim7600Cellular::check_ntp_status() {
   return (err == 0) ? true : false;
 }
 
+// bool Sim7600Cellular::check_attachNW() {
+//   int ret = 0;
+//   if (_atc->send("AT+CGATT?") && _atc->recv("+CGATT: %d\r\n", &ret)) {
+//     if (ret == 1) {
+//       return true;
+//     } else {
+//       return false;
+//     }
+//   }
+//   return false;
+// }
+
 bool Sim7600Cellular::check_attachNW() {
-  int ret = 0;
+  int ret = -1;
+//   _atc->set_timeout(9000);
+//   _atc->debug_on(1);
+
   if (_atc->send("AT+CGATT?") && _atc->recv("+CGATT: %d\r\n", &ret)) {
-    if (ret == 1) {
-      return true;
-    } else {
-      return false;
-    }
+    printf("check_attachNW received pattern: +CGATT: %d\r\n", ret);
+  } else {
+    ret = -1;
   }
+
+//   _atc->set_timeout(8000);
+//   _atc->flush();
+//   _atc->debug_on(0);
+  return (ret == 1) ? true : false;
+}
+
+bool Sim7600Cellular::set_attachNW(int en) {
+  _atc->debug_on(1);
+  printf("set_attachNW processing --> en=%d\r\n", en);
+
+  if (_atc->send("AT+CGATT=%d", en) && _atc->recv("OK")) {
+    _atc->debug_on(0);
+    return true;
+  }
+
+  _atc->debug_on(0);
   return false;
 }
 
@@ -322,6 +352,15 @@ bool Sim7600Cellular::set_min_cFunction() {
     return true;
   }
   return false;
+}
+int Sim7600Cellular::get_cfun_mode() {
+  int cmode = -1;
+
+  if (_atc->send("AT+CFUN?") && _atc->scanf("+CFUN: %d", &cmode)) {
+    printf("current cfun mode = %d\r\n", cmode);
+    return cmode;
+  }
+  return cmode;
 }
 
 int Sim7600Cellular::get_revID(char *revid) {

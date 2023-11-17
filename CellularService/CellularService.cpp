@@ -3,29 +3,59 @@
 #include <cstdint>
 #include <cstdlib>
 
-CellularService::CellularService(PinName tx, PinName rx, DigitalOut &en,
-                                 DigitalOut &rst)
-    : Sim7600Cellular(tx, rx), vrf_en(en), mdm_rst(rst) {}
+// CellularService::CellularService(PinName tx, PinName rx, DigitalOut &en,
+//                                  DigitalOut &rst)
+//     : Sim7600Cellular(tx, rx), vrf_en(en), mdm_rst(rst) {}
 
-CellularService::CellularService(BufferedSerial *_serial, DigitalOut &en,
-                                 DigitalOut &rst)
-    : Sim7600Cellular(_serial), vrf_en(en), mdm_rst(rst) {}
+// CellularService::CellularService(BufferedSerial *_serial, DigitalOut &en,
+//                                  DigitalOut &rst)
+//     : Sim7600Cellular(_serial), vrf_en(en), mdm_rst(rst) {}
 
-CellularService::CellularService(ATCmdParser *_parser, DigitalOut &en,
-                                 DigitalOut &rst)
-    : Sim7600Cellular(_parser), vrf_en(en), mdm_rst(rst) {}
+// CellularService::CellularService(ATCmdParser *_parser, DigitalOut &en,
+//                                  DigitalOut &rst)
+//     : Sim7600Cellular(_parser), vrf_en(en), mdm_rst(rst) {}
 
-void CellularService::vrf_enable(bool en) {
+CellularService::CellularService(PinName tx, PinName rx, DigitalOut &pwrkey,
+                                 DigitalOut &rst)
+    : Sim7600Cellular(tx, rx), mdm_pwr(pwrkey), mdm_rst(rst) {}
+
+CellularService::CellularService(BufferedSerial *_serial, DigitalOut &pwrkey,
+                                 DigitalOut &rst)
+    : Sim7600Cellular(_serial), mdm_pwr(pwrkey), mdm_rst(rst) {}
+
+CellularService::CellularService(ATCmdParser *_parser, DigitalOut &pwrkey,
+                                 DigitalOut &rst)
+    : Sim7600Cellular(_parser), mdm_pwr(pwrkey), mdm_rst(rst) {}
+
+// void CellularService::vrf_enable(bool en) {
+//   if (en) {
+//     vrf_en = 1;
+//     printf("vrf_en : ON\r\n");
+//   } else {
+//     vrf_en = 0;
+//     printf("vrf_en : OFF\r\n");
+//   }
+// }
+
+void CellularService::powerkey_trig_mode(bool en) {
+
+  mdm_pwr = 0;
+  ThisThread::sleep_for(100ms);
+
+  mdm_pwr = 1; // Active LOW
+
   if (en) {
-    vrf_en = 1;
-    printf("vrf_en : ON\r\n");
+    debug("MDM Powerkey : ON\r\n");
+    ThisThread::sleep_for(100ms);
   } else {
-    vrf_en = 0;
-    printf("vrf_en : OFF\r\n");
+    debug("MDM Powerkey : OFF\r\n");
+    ThisThread::sleep_for(3000ms);
   }
+
+  mdm_pwr = 0;
 }
 
-bool CellularService::MDM_HW_reset(void) {
+void CellularService::MDM_HW_reset(void) {
   printf("MDM HW reset\r\n");
   mdm_rst = 0;
   ThisThread::sleep_for(100ms);
@@ -33,7 +63,7 @@ bool CellularService::MDM_HW_reset(void) {
   ThisThread::sleep_for(3000ms);
   mdm_rst = 0;
   // wait_ms(200);
-  return true;
+  //   return true;
 }
 
 bool CellularService::initial_NW() {
@@ -43,6 +73,9 @@ bool CellularService::initial_NW() {
 
   if (mdmOK) {
     printf("SIM7600 Status: Ready\r\n");
+
+    debug_if(this->delete_allsms(), "delete all sms complete...\r\n");
+
     if (this->enable_echo(0)) {
 
       if (!this->save_setting()) {
@@ -62,6 +95,7 @@ bool CellularService::initial_NW() {
   //   }
 
   if (mdmOK) {
+    this->set_cops();
     this->set_full_FUNCTION();
   }
 
@@ -69,9 +103,16 @@ bool CellularService::initial_NW() {
   debug_if(this->get_ICCID(cell_info.iccid) > 0, "iccid=  %s\r\n",
            cell_info.iccid);
 
-  while (!mdmAtt) {
+  debug_if(!this->set_attachNW(1), "Set_attachNW Fail!\r\n");
+
+  int nty = 0;
+  //   while (!mdmAtt) {
+  while ((!mdmAtt) && (nty < 5)) {
+    ThisThread::sleep_for(3000ms);
     mdmAtt = this->check_attachNW();
-    ThisThread::sleep_for(2000ms);
+    nty++;
+    // mdmAtt = this->set_attachNW(1);
+    // ThisThread::sleep_for(3000ms);
   }
 
   debug_if(!mdmAtt, "NW Attaching Fail ...\r\n");
@@ -131,9 +172,7 @@ void CellularService::sync_rtc(char cclk[64]) {
   }
 }
 
-void CellularService::ctrl_timer(bool in = false) {
-  in ? tm1.start() : tm1.stop();
-}
+void CellularService::ctrl_timer(bool in) { in ? tm1.start() : tm1.stop(); }
 
 int CellularService::read_systime_ms() {
   return duration_cast<chrono::milliseconds>(tm1.elapsed_time()).count();

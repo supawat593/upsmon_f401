@@ -20,6 +20,7 @@ public:
   bool check_ntp_status();
 
   bool check_attachNW();
+  bool set_attachNW(int en = 0);
   int set_cops(int mode = 0, int format = 2);
   int get_cops(char *cops);
   int get_csq(int *power, int *ber, int retry = 10);
@@ -31,6 +32,7 @@ public:
   int get_cereg(char *payload);
   bool set_full_FUNCTION(int rst = 0);
   bool set_min_cFunction();
+  int get_cfun_mode();
   int get_revID(char *revid);
   int get_IMEI(char *simei);
   int get_ICCID(char *ciccid);
