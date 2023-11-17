@@ -3,18 +3,6 @@
 #include <cstdint>
 #include <cstdlib>
 
-// CellularService::CellularService(PinName tx, PinName rx, DigitalOut &en,
-//                                  DigitalOut &rst)
-//     : Sim7600Cellular(tx, rx), vrf_en(en), mdm_rst(rst) {}
-
-// CellularService::CellularService(BufferedSerial *_serial, DigitalOut &en,
-//                                  DigitalOut &rst)
-//     : Sim7600Cellular(_serial), vrf_en(en), mdm_rst(rst) {}
-
-// CellularService::CellularService(ATCmdParser *_parser, DigitalOut &en,
-//                                  DigitalOut &rst)
-//     : Sim7600Cellular(_parser), vrf_en(en), mdm_rst(rst) {}
-
 CellularService::CellularService(PinName tx, PinName rx, DigitalOut &pwrkey,
                                  DigitalOut &rst)
     : Sim7600Cellular(tx, rx), mdm_pwr(pwrkey), mdm_rst(rst) {}
@@ -26,16 +14,6 @@ CellularService::CellularService(BufferedSerial *_serial, DigitalOut &pwrkey,
 CellularService::CellularService(ATCmdParser *_parser, DigitalOut &pwrkey,
                                  DigitalOut &rst)
     : Sim7600Cellular(_parser), mdm_pwr(pwrkey), mdm_rst(rst) {}
-
-// void CellularService::vrf_enable(bool en) {
-//   if (en) {
-//     vrf_en = 1;
-//     printf("vrf_en : ON\r\n");
-//   } else {
-//     vrf_en = 0;
-//     printf("vrf_en : OFF\r\n");
-//   }
-// }
 
 void CellularService::powerkey_trig_mode(bool en) {
 
@@ -74,7 +52,7 @@ bool CellularService::initial_NW() {
   if (mdmOK) {
     printf("SIM7600 Status: Ready\r\n");
 
-    debug_if(this->delete_allsms(), "delete all sms complete...\r\n");
+    debug_if(!this->delete_allsms(), "delete all sms fail!\r\n");
 
     if (this->enable_echo(0)) {
 

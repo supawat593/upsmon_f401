@@ -50,13 +50,10 @@ DigitalIn mdm_status(MDM_STATUS_PIN);
 DigitalOut mdm_dtr(MDM_DTR_PIN);
 DigitalIn mdm_ri(MDM_RI_PIN);
 
-// InterruptIn pwake(WDT_WAKE_PIN);
-// DigitalOut pdone(WDT_DONE_PIN, 0);
 DigitalIn usb_det(USB_DET_PIN);
 
 BusIn dipsw(DIPSW_P4_PIN, DIPSW_P3_PIN, DIPSW_P2_PIN, DIPSW_P1_PIN);
 
-// volatile bool isWake = false;
 volatile bool is_script_read = false;
 volatile bool is_usb_plug = false;
 bool mdmOK = false;
@@ -70,8 +67,6 @@ int last_utc_update_stat = 0;
 unsigned int last_rtc_check_NW = 0;
 unsigned int rtc_uptime = 0;
 
-char str_topic[128];
-char mqtt_msg[256];
 char str_sub_topic[128];
 
 Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
@@ -86,6 +81,8 @@ EventQueue isr_queue;
 
 init_script_t init_script, iap_init_script;
 unique_stat_t mydata;
+
+mqttPayload *mqtt_obj = NULL;
 
 unsigned int *uid = (unsigned int *)0x801bffc;
 
@@ -196,24 +193,14 @@ void capture_thread_routine() {
 
       mail->utc = (unsigned int)rtc_read();
       strcpy(mail->cmd, str_cmd[j]);
-      // strcpy(mail->resp, dummy_msg);
       xtc232->flush();
-      //   xtc232->send(mail->cmd);
-      debug_if(xtc232->send(mail->cmd), "send command: %s\r\n", mail->cmd);
 
-      //   read_xtc_to_char(ret_rs232, 128, '\r');
+      debug_if(xtc232->send(mail->cmd), "send command: %s\r\n", mail->cmd);
       read_xparser_to_char(ret_rs232, 128, '\r', xtc232);
-      //   strcpy(ret_rs232, str_ret[j]);
 
       if (strlen(ret_rs232) > 0) {
 
-        // printf("cmd[%d][0]= 0x%02X , ret[0]= 0x%02X\r\n", j,
-        // str_cmd[j][0],ret_rs232[0]);
-
         strcpy(mail->resp, ret_rs232);
-
-        // memset(usb_ret, 0, 128);
-        // strcpy(usb_ret, ret_rs232);
 
         // <---------- mail for usb return msg ------------->
         mail_t *xmail = ret_usb_mail.try_alloc();
@@ -232,8 +219,12 @@ void capture_thread_routine() {
         mail_box.put(mail);
 
       } else {
-        debug("command: %s [NO RESP.]\r\n", mail->cmd);
-        mail_box.free(mail);
+        // debug("command: %s [NO RESP.]\r\n", mail->cmd);
+        // mail_box.free(mail);
+
+        strcpy(mail->resp, "NO_RESP");
+        debug("command: %s [NO_RESP.]\r\n", mail->cmd);
+        mail_box.put(mail);
       }
     }
 
@@ -242,9 +233,7 @@ void capture_thread_routine() {
     set_idle_rs232(true);
 
     period_min = read_dipsw();
-    // if (period_min < 2) {
-    //   period_min = 2;
-    // }
+
     static int cmd_period =
         duration_cast<chrono::seconds>(duration_tme.elapsed_time()).count();
     duration_tme.stop();
@@ -347,8 +336,9 @@ void mdm_notify_routine() {
                      data1, data2, &int2) == 4) {
             u32_x1 = hex2int(data1);
             u32_x2 = hex2int(data2);
-            debug("int1= %d\tint2= %d\r\nu32_x1= %04X\tu32_x2= %08X\r\n", int1,
-                  int2, u32_x1, u32_x2);
+            // debug("int1= %d\tint2= %d\r\nu32_x1= %04X\tu32_x2= %08X\r\n",
+            // int1,
+            //       int2, u32_x1, u32_x2);
           }
         } else if (detection_notify("+CREG:", mdm_xbuf, oob_msg.rxtopic_msg)) {
           printf("Notify msg: %s\r\n", oob_msg.rxtopic_msg);
@@ -357,6 +347,14 @@ void mdm_notify_routine() {
           printf("Notify msg: %s\r\n", oob_msg.rxtopic_msg);
           bmqtt_cnt = false;
           bmqtt_sub = false;
+
+          int int_cause;
+          if (sscanf(oob_msg.rxtopic_msg, "+CMQTTCONNLOST: %*d,%d",
+                     &int_cause) == 1) {
+            debug_if(int_cause == 3, "cause=3 -> Network is closed.\r\e");
+            // bmqtt_cnt = false;
+            // bmqtt_sub = false;
+          }
         } else if (detection_notify("+CMQTTNONET", mdm_xbuf,
                                     oob_msg.rxtopic_msg)) {
           printf("Notify msg: %s\r\n", oob_msg.rxtopic_msg);
@@ -398,13 +396,10 @@ int main() {
   printf("Firmware Version: %s" CRLF, firmware_vers);
   printf("SystemCoreClock : %.3f MHz.\r\n", SystemCoreClock / 1000000.0);
   //   printf("timestamp : %d\r\n", (unsigned int)rtc_read());
+  printf("Serial Number: UPS%d\r\n", *uid);
   printf("timestamp : %d\r\n", (unsigned int)time(NULL));
-  printf("capture period : %d minutes\r\n", period_min);
-
-  char sn[12];
-  sprintf(sn, "UPS%d", *uid);
-  //   printf("uid: %d\r\n", *uid);
-  printf("Serial Number: %s\r\n", sn);
+  printf("----------------------------------------\r\n");
+  printf("\r\ncapture period : %d minutes\r\n", period_min);
 
   ext.init();
   ext.read_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
@@ -420,14 +415,6 @@ int main() {
   //     // printHEX((unsigned char *)&iap_init_script, sizeof(init_script_t));
   //   }
 
-  //   unique_stat_t *xbuffer = (unique_stat_t *)malloc(sizeof(unique_stat_t));
-  //   iap.read(xbuffer, iap_script_offset, sizeof(unique_stat_t));
-  //   memcpy(&mydata, xbuffer, sizeof(init_script_t));
-  //   printHEX((unsigned char *)xbuffer, sizeof(unique_stat_t));
-  //   //   if (mydata.uid)
-  //   printf("uid: %d\r\n", mydata.uid);
-  //   free(xbuffer);
-
   isr_thread.start(callback(&isr_queue, &EventQueue::dispatch_forever));
   tpl5010.init(&isr_queue);
 
@@ -439,19 +426,14 @@ int main() {
   }
 
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
-  //   modem = new CellularService(_parser, vrf_en, mdm_rst);
   modem = new CellularService(_parser, mdm_pwr, mdm_rst);
 
   xtc232 = new ATCmdParser(&rs232, "\r", 256, 1000);
   ThisThread::sleep_for(500ms);
 
-  vrf_en = 1;
+  mqtt_obj = new mqttPayload(&init_script, modem);
 
-  //   mdm_pwr = 1;
-  //   ThisThread::sleep_for(100ms);
-  //   mdm_pwr = 0;
-  //   debug("powerkey triggering!!!\r\n");
-  //   ThisThread::sleep_for(8s);
+  vrf_en = 1;
   modem->powerkey_trig_mode(1);
 
   modem->ctrl_timer(1);
@@ -470,23 +452,18 @@ int main() {
   //   modem->check_at_ready();
   //   modem->check_modem_status(3) ? netstat_led(IDLE) : netstat_led(OFF);
   modem->check_at_ready() ? netstat_led(IDLE) : netstat_led(OFF);
-  //   debug("read ati\r\n");
-  //   modem->read_ati();
 
   last_rtc_check_NW = (unsigned int)rtc_read();
   if (ext.get_script_flag() && modem->initial_NW()) {
     netstat_led(CONNECTED);
   }
 
-  //   debug("read ati\r\n");
   char msg_ati[128] = {0};
   modem->get_ati(msg_ati);
   debug_if(strlen(msg_ati) > 0,
            "\r\n------ ATI Return mesg. "
            "------\r\n%s\r\n------------------------------\r\n\r\n",
            msg_ati);
-
-  debug_if(modem->delete_allsms(), "delete all sms complete...\r\n");
 
   modem->ntp_setup();
 
@@ -512,7 +489,7 @@ int main() {
     bmqtt_cnt = modem->mqtt_connect(modem->cell_info.dns_ip, init_script.usr,
                                     init_script.pwd, init_script.port);
     debug_if(bmqtt_cnt, "MQTT Connected\r\n");
-    device_stat_update(modem, init_script.topic_path, "RESTART");
+    device_stat_update(modem, mqtt_obj, "RESTART");
     last_utc_update_stat = (int)rtc_read();
   }
 
@@ -525,6 +502,7 @@ int main() {
     memset(str_sub_topic, 0, 128);
     sprintf(str_sub_topic, "%s/config/%s", init_script.topic_path,
             modem->cell_info.imei);
+
     bmqtt_sub = modem->mqtt_sub(str_sub_topic);
 
     // if (bmqtt_sub) {
@@ -562,20 +540,22 @@ int main() {
       printf("cmd : %s" CRLF, mail->cmd);
       printf("resp : %s" CRLF, mail->resp);
 
-      memset(str_topic, 0, 128);
-      memset(mqtt_msg, 0, 256);
-      sprintf(str_topic, "%s/data/%s", init_script.topic_path,
-              modem->cell_info.imei);
-      sprintf(mqtt_msg, payload_pattern, modem->cell_info.imei, mail->utc,
-              init_script.model, init_script.siteID, mail->cmd, mail->resp);
+      mqtt_obj->make_mqttPubTopic();
+      mqtt_obj->make_mqttPayload(mail);
 
       if (bmqtt_cnt && (!get_mdm_busy())) {
         set_notify_ready(false);
         set_mdm_busy(true);
 
-        if (modem->mqtt_publish(str_topic, mqtt_msg)) {
+        // if (modem->mqtt_publish(str_pub_topic, mqtt_msg)) {
+        //   printf("< ------------------------------------------------ >"
+        //   CRLF);
+        // }
+        if (modem->mqtt_publish(mqtt_obj->mqttpub_topic,
+                                mqtt_obj->mqtt_payload)) {
           printf("< ------------------------------------------------ >" CRLF);
         }
+
         set_mdm_busy(false);
 
         // if (bmqtt_sub) {
@@ -600,18 +580,12 @@ int main() {
         // check AT>OK
         if (!modem->check_modem_status(10)) {
           netstat_led(OFF);
-          //   vrf_en = 0;
+
           vrf_en = 0;
           ThisThread::sleep_for(500ms);
-          //   vrf_en = 1;
           vrf_en = 1;
 
-          //********* powerkey
-          //   mdm_pwr = 1;
-          //   ThisThread::sleep_for(100ms);
-          //   mdm_pwr = 0;
           modem->powerkey_trig_mode(1);
-          //********* powerkey
 
           bmqtt_start = false;
           bmqtt_cnt = false;
@@ -789,7 +763,8 @@ int main() {
 
               last_utc_update_stat = (int)rtc_read();
               printf("last_utc_update_stat : %d\r\n", last_utc_update_stat);
-              device_stat_update(modem, init_script.topic_path);
+              //   device_stat_update(modem, init_script.topic_path);
+              device_stat_update(modem, mqtt_obj);
             }
 
           } else {

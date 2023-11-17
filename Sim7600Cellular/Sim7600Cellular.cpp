@@ -166,8 +166,8 @@ bool Sim7600Cellular::check_ntp_status() {
 
 bool Sim7600Cellular::check_attachNW() {
   int ret = -1;
-//   _atc->set_timeout(9000);
-//   _atc->debug_on(1);
+  //   _atc->set_timeout(9000);
+  //   _atc->debug_on(1);
 
   if (_atc->send("AT+CGATT?") && _atc->recv("+CGATT: %d\r\n", &ret)) {
     printf("check_attachNW received pattern: +CGATT: %d\r\n", ret);
@@ -175,14 +175,14 @@ bool Sim7600Cellular::check_attachNW() {
     ret = -1;
   }
 
-//   _atc->set_timeout(8000);
-//   _atc->flush();
-//   _atc->debug_on(0);
+  //   _atc->set_timeout(8000);
+  //   _atc->flush();
+  //   _atc->debug_on(0);
   return (ret == 1) ? true : false;
 }
 
 bool Sim7600Cellular::set_attachNW(int en) {
-  _atc->debug_on(1);
+  //   _atc->debug_on(1);
   printf("set_attachNW processing --> en=%d\r\n", en);
 
   if (_atc->send("AT+CGATT=%d", en) && _atc->recv("OK")) {
@@ -190,7 +190,7 @@ bool Sim7600Cellular::set_attachNW(int en) {
     return true;
   }
 
-  _atc->debug_on(0);
+  //   _atc->debug_on(0);
   return false;
 }
 
@@ -579,8 +579,11 @@ int Sim7600Cellular::ping_dstNW(char *dst, int nrty, int p_size,
 }
 
 bool Sim7600Cellular::delete_allsms() {
-  debug("delete all sms\r\n");
-  return _atc->send("AT+CMGD=1,4") && _atc->recv("OK");
+  if (_atc->send("AT+CMGD=1,4") && _atc->recv("OK")) {
+    debug("delete all sms complete ...\r\n");
+    return true;
+  }
+  return false;
 }
 
 bool Sim7600Cellular::mqtt_start() {
@@ -660,7 +663,8 @@ int Sim7600Cellular::mqtt_connect_stat() {
     // 0,"tcp://188.166.189.39:1883",60,0,"IoTdevices","devices@iot"
     if (sscanf(_ret, "%d,\"%*[^\"]\",%d,%d,\"%*[^\"]\",\"%*[^\"]\"", &nret,
                &keepAlive, &clean) == 3) {
-
+      debug("client_index=%d keepalive=%d clean_session=%d\r\n", nret,
+            keepAlive, clean);
       //   sprintf(ret_msg, "+CMQTTCONNECT: %s", _ret);
       return 1;
 
@@ -695,39 +699,27 @@ int Sim7600Cellular::mqtt_connect_stat(char *ret_msg) {
 }
 
 int Sim7600Cellular::mqtt_isdisconnect(int clientindex) {
-  char rcvbuf[64];
-  char rcv[15];
+  char rcv[20];
   int disc_state = 0;
-  int len = 0;
-  sprintf(rcv, "+CMQTTDISC: %d", clientindex);
-  len = strlen(rcv);
-  _atc->set_timeout(2000);
-  _atc->flush();
-  _atc->send("AT+CMQTTDISC?");
-  //   if (_atc->send("AT+CMQTTDISC?")) {
-  _atc->read(rcvbuf, 64);
-  _atc->set_timeout(8000);
-  //   printHEX((unsigned char *)rcvbuf, 64);
 
-  int st = 0;
-  while ((strncmp(&rcvbuf[st], rcv, len) != 0) && (st < 64)) {
-    st++;
+  sprintf(rcv, "+CMQTTDISC: %d,%%d\r\n", clientindex);
+  //   debug("rcv= %s\r\n", rcv);
+
+  int cnt_state = -1;
+
+  if ((_atc->send("AT+CMQTTDISC?")) && (_atc->recv(rcv, &disc_state)) &&
+      (_atc->recv("OK"))) {
+    cnt_state = (disc_state == 0) ? 1 : 0;
+
+    debug_if(cnt_state == 1, "client_index=%d : MQTT Connected\r\n",
+             clientindex);
+    debug_if(cnt_state == 0, "client_index=%d : MQTT Disconnected\r\n",
+             clientindex);
+
+    return cnt_state;
   }
 
-  if (st < 64) {
-    char sub_ret[64 - st];
-    memset(sub_ret, 0, 64 - st);
-    memcpy(&sub_ret, &rcvbuf[st], 64 - st);
-    sscanf(sub_ret, "+CMQTTDISC: %*d,%d\r\n", &disc_state);
-
-    if (!disc_state) {
-      printf("MQTT : Connection\r\n");
-      return 1;
-    } else {
-      printf("MQTT : Disconnection\r\n");
-      return 0;
-    }
-  }
+  debug("mqtt_isdisconnect pattern checking fail!\r\n");
   return -1;
 }
 
@@ -746,7 +738,7 @@ bool Sim7600Cellular::mqtt_publish(char topic[128], char payload[512], int qos,
   sprintf(cmd_pub_msg, "AT+CMQTTPAYLOAD=0,%d", len_payload);
   sprintf(cmd_pub, "AT+CMQTTPUB=0,%d,%d", qos, interval_s);
 
-  printf("cmd_pub_topic= %s\r\n", cmd_pub_topic);
+  //   debug("cmd_pub_topic= %s\r\n", cmd_pub_topic);
   _atc->flush();
   _atc->send(cmd_pub_topic);
 
@@ -757,7 +749,7 @@ bool Sim7600Cellular::mqtt_publish(char topic[128], char payload[512], int qos,
     }
   }
 
-  printf("cmd_pub_msg= %s\r\n", cmd_pub_msg);
+  //   debug("cmd_pub_msg= %s\r\n", cmd_pub_msg);
   _atc->flush();
   if (_atc->send(cmd_pub_msg) && _atc->recv(">")) {
     if ((_atc->write(payload, len_payload) == len_payload) &&
@@ -766,7 +758,7 @@ bool Sim7600Cellular::mqtt_publish(char topic[128], char payload[512], int qos,
     }
   }
 
-  printf("cmd_pub= %s\r\n", cmd_pub);
+  //   debug("cmd_pub= %s\r\n", cmd_pub);
   ThisThread::sleep_for(1s);
   _atc->flush();
   _atc->set_timeout(12000);

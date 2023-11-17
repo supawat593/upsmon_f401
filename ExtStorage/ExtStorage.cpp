@@ -7,7 +7,7 @@ ExtStorage::ExtStorage(BlockDevice *_bd, FATFileSystem *_fs) {
   is_script_read = false;
 }
 bool ExtStorage::init() {
-  printf("initial_upsmon_FileSystem \r\n");
+  printf("init_upsmon_filesystem \r\n");
 
   int err_bd = bd->init();
   debug_if(err_bd != 0, "bd.init() -> err =%d\r\n", err_bd);
@@ -17,7 +17,7 @@ bool ExtStorage::init() {
   return (err_bd == 0) && (err_fs == 0);
 }
 bool ExtStorage::deinit() {
-  printf("deinitial_upsmon_FileSystem \r\n");
+  printf("deinit_upsmon_filesystem \r\n");
 
   int err_fs = fs->unmount();
   debug_if(err_fs != 0, "fs.unmount() -> err =%d\r\n", err_fs);
@@ -67,7 +67,7 @@ void ExtStorage::read_init_script(init_script_t *_script, char path[128],
   debug_if(file == NULL, "*** fopen fail ! ***\r\n");
 
   if (file != NULL) {
-    printf("initial script found\r\n");
+    // printf("initial script found\r\n");
 
     // apply_update(file, POST_APPLICATION_ADDR );
     apply_script(file, path, _script);
@@ -89,7 +89,7 @@ void ExtStorage::apply_script(FILE *file, char path[128],
 
   fseek(file, 0, SEEK_END);
   long len = ftell(file);
-  printf("initial script file size is %ld bytes\r\n", len);
+  printf("init_script have found : filesize = %ld bytes\r\n", len);
   fseek(file, 0, SEEK_SET);
 
   int result = 0;
