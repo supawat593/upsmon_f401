@@ -19,6 +19,8 @@ public:
   void apply_script(FILE *_file, char path[128], init_script_t *_script);
   bool get_script_flag();
 
+  void write_data_log(char msg[256], char path[128]);
+
 private:
   FILE *file;
   Mutex file_mtx;

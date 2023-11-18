@@ -171,3 +171,26 @@ void ExtStorage::apply_script(FILE *file, char path[128],
 }
 
 bool ExtStorage::get_script_flag() { return is_script_read; }
+void ExtStorage::write_data_log(char msg[256], char path[128]) {
+
+  static char temp_msg[256];
+  memset(temp_msg, 0, 256);
+  strcpy(temp_msg, msg);
+  strcat(temp_msg, "\r\n");
+
+  file_mtx.lock();
+  file = fopen(path, "a+");
+  debug_if(file == NULL, "*** fopen logfile fail ! ***\r\n");
+
+  if (file != NULL) {
+
+    debug_if(strlen(temp_msg) > 0,
+             "<----- Log %s Appending ----->\r\nPayload-> %s\r\n", path,
+             temp_msg);
+
+    fprintf(file, temp_msg);
+  }
+
+  fclose(file);
+  file_mtx.unlock();
+}

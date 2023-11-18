@@ -543,6 +543,10 @@ int main() {
       mqtt_obj->make_mqttPubTopic();
       mqtt_obj->make_mqttPayload(mail);
 
+      // test logging
+      ext.write_data_log(mqtt_obj->mqtt_payload, (char *)FULL_LOG_FILE_PATH);
+      // end test logging
+
       if (bmqtt_cnt && (!get_mdm_busy())) {
         set_notify_ready(false);
         set_mdm_busy(true);

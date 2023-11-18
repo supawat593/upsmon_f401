@@ -83,6 +83,9 @@
 #define SPIF_MOUNT_PATH "spif"
 #define FULL_SCRIPT_FILE_PATH "/" SPIF_MOUNT_PATH "/" INITIAL_APP_FILE
 
+#define LOG_FILENAME "mylog.txt"
+#define FULL_LOG_FILE_PATH "/" SPIF_MOUNT_PATH "/" LOG_FILENAME
+
 char mqtt_broker_ip[] = "188.166.189.39";
 // char mqtt_broker[] = "trueiot.io";
 // int mqtt_port = 1883;
