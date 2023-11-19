@@ -113,6 +113,22 @@ volatile bool is_idle_rs232 = true;
 volatile bool is_mdm_busy = true;
 volatile bool is_notify_ready = false;
 
+unsigned int last_rtc_pub = 0;
+Mutex mtx_rtc_msg;
+
+unsigned int get_rtc_pub() {
+  unsigned int temp = 0;
+  mtx_rtc_msg.lock();
+  temp = last_rtc_pub;
+  mtx_rtc_msg.unlock();
+  return temp;
+}
+void set_rtc_pub(unsigned int nrtc) {
+  mtx_rtc_msg.lock();
+  last_rtc_pub = nrtc;
+  mtx_rtc_msg.unlock();
+}
+
 void printout_mqttsub_notify(mqttsub_notify_t *data) {
   mutex_notify.lock();
   printf("<-------------------------------------------------\r\n");

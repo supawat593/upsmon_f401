@@ -20,6 +20,7 @@ public:
   bool get_script_flag();
 
   void write_data_log(char msg[256], char path[128]);
+  int check_filesize(char full_path[128], const char *fopen_mode = "r");
 
 private:
   FILE *file;

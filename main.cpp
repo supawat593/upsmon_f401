@@ -17,6 +17,12 @@
 #include "FATFileSystem.h"
 #include "SPIFBlockDevice.h"
 
+#define FLAG_PPS (1UL << 0)
+#define FLAG_SOS (1UL << 1)
+#define FLAG_UPLOAD (1UL << 2)
+#define FLAG_FWCHECK (1UL << 3)
+#define FLAG_CFGCHECK (1UL << 4)
+
 #if TARGET_NUCLEO_F401RE
 #define LED2 PA_6
 #endif
@@ -69,15 +75,24 @@ unsigned int rtc_uptime = 0;
 
 char str_sub_topic[128];
 
+// Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
+//     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
+//     capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
+//     mdm_notify_thread(osPriorityNormal, 0x0c00, nullptr,
+//     "mdm_notify_thread");
+
 Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
     capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
-    mdm_notify_thread(osPriorityNormal, 0x0c00, nullptr, "mdm_notify_thread");
+    mdm_notify_thread(osPriorityNormal, 0x0c00, nullptr, "mdm_notify_thread"),
+    cellular_thread(osPriorityNormal, 0x2000, nullptr, "cellular_thread");
 
 Thread *usb_thread;
 Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
 
 EventQueue isr_queue;
+EventFlags mdm_evt_flags;
+Semaphore mdm_sem(1);
 
 init_script_t init_script, iap_init_script;
 unique_stat_t mydata;
@@ -85,6 +100,11 @@ unique_stat_t mydata;
 mqttPayload *mqtt_obj = NULL;
 
 unsigned int *uid = (unsigned int *)0x801bffc;
+
+int i_cmd = 0;
+int len_mqttpayload = 0;
+
+void cellular_task();
 
 uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
@@ -171,6 +191,7 @@ void capture_thread_routine() {
     ptr = strtok(NULL, delim);
   }
 
+  i_cmd = n_cmd;
   printf("---> start Capture Thread <---\r\n");
 
   while (true) {
@@ -513,6 +534,7 @@ int main() {
   mdm_notify_thread.start(callback(mdm_notify_routine));
   capture_thread.start(callback(capture_thread_routine));
   //   usb_thread.start(callback(usb_passthrough));
+  cellular_thread.start(callback(cellular_task));
 
   while (true) {
 
@@ -544,36 +566,63 @@ int main() {
       mqtt_obj->make_mqttPayload(mail);
 
       // test logging
+      len_mqttpayload = strlen(mqtt_obj->mqtt_payload);
       ext.write_data_log(mqtt_obj->mqtt_payload, (char *)FULL_LOG_FILE_PATH);
+      debug("logsize %S = %d bytes.\r\n", FULL_LOG_FILE_PATH,
+            ext.check_filesize(FULL_LOG_FILE_PATH, "r"));
       // end test logging
 
-      if (bmqtt_cnt && (!get_mdm_busy())) {
-        set_notify_ready(false);
-        set_mdm_busy(true);
+      //   if (bmqtt_cnt && (!get_mdm_busy())) {
+      //     set_notify_ready(false);
+      //     set_mdm_busy(true);
 
-        // if (modem->mqtt_publish(str_pub_topic, mqtt_msg)) {
-        //   printf("< ------------------------------------------------ >"
-        //   CRLF);
-        // }
-        if (modem->mqtt_publish(mqtt_obj->mqttpub_topic,
-                                mqtt_obj->mqtt_payload)) {
-          printf("< ------------------------------------------------ >" CRLF);
-        }
+      //     // if (modem->mqtt_publish(str_pub_topic, mqtt_msg)) {
+      //     //   printf("< ------------------------------------------------ >"
+      //     //   CRLF);
+      //     // }
+      //     if (modem->mqtt_publish(mqtt_obj->mqttpub_topic,
+      //                             mqtt_obj->mqtt_payload)) {
+      //       printf("< ------------------------------------------------ >"
+      //       CRLF);
+      //     }
 
-        set_mdm_busy(false);
+      //     set_mdm_busy(false);
 
-        // if (bmqtt_sub) {
-        //   set_notify_ready(true);
-        // }
-      }
+      //     // if (bmqtt_sub) {
+      //     //   set_notify_ready(true);
+      //     // }
+      //   }
 
       mail_box.free(mail);
     }
     //  else NullPtr
+
     else {
+      //   if (((unsigned int)rtc_read() - get_rtc_pub()) >
+      //       ((unsigned int)(0.5 * 60 * read_dipsw()))) {
+      if (((unsigned int)rtc_read() - get_rtc_pub()) >
+          ((unsigned int)(0.5 * 60 * period_min))) {
+
+        int log_len = ext.check_filesize(FULL_LOG_FILE_PATH, "r");
+        // debug("logsize %S = %d bytes.\r\n", FULL_LOG_FILE_PATH, log_len);
+
+        // if (ext.check_filesize(FULL_LOG_FILE_PATH) >
+        //     ((int)((i_cmd - 0.5) * len_mqttpayload))) {
+        if (log_len > ((int)((i_cmd - 0.5) * len_mqttpayload))) {
+
+          set_rtc_pub((unsigned int)rtc_read());
+          mdm_evt_flags.set(FLAG_UPLOAD);
+        }
+        // mdm_evt_flags.set(FLAG_UPLOAD);
+      }
+
       //   if (((unsigned int)rtc_read() - last_rtc_check_NW) > 55) {
-      if ((((unsigned int)rtc_read() - last_rtc_check_NW) > 65) &&
-          (!get_mdm_busy())) {
+      else if ((((unsigned int)rtc_read() - last_rtc_check_NW) > 52) &&
+               (!get_mdm_busy())) {
+        //   else if ((((unsigned int)rtc_read() - last_rtc_check_NW) > 65) &&
+        //            (!get_mdm_busy())) {
+        //   if ((((unsigned int)rtc_read() - last_rtc_check_NW) > 65) &&
+        //       (!get_mdm_busy())) {
         last_rtc_check_NW = (unsigned int)rtc_read();
         printf(CRLF "<----- Checking NW. Status ----->" CRLF);
         printf("timestamp : %d\r\n", last_rtc_check_NW);
@@ -638,7 +687,7 @@ int main() {
                    modem->cell_info.ber);
 
           memset(modem->cell_info.cpsi_msg, 0, 128);
-          debug_if(modem->get_cpsi(modem->cell_info.cpsi_msg), "cpsi=> %s\r\n",
+          debug_if(modem->get_cpsi(modem->cell_info.cpsi_msg), "cpsi=> %s\r\n ",
                    modem->cell_info.cpsi_msg);
 
           mdmAtt = modem->check_attachNW();
@@ -834,6 +883,113 @@ int main() {
         }
 
       } // end last_rtc_check_NW > 55
-    }   // end else NullPtr
-  }     // end while(true)
+      else {
+      }
+
+    } // end else NullPtr
+
+  } // end while(true)
 } // end main()
+
+void cellular_task() {
+
+  unsigned long flags_read = 0;
+  //   char logpath[128];
+  //   sprintf(logpath, "/%s/mylog.txt", SPIF_MOUNT_PATH);
+  printf("Starting cellular_task()        : %p\r\n", ThisThread::get_id());
+
+  while (true) {
+
+    flags_read = mdm_evt_flags.wait_any(
+        FLAG_UPLOAD | FLAG_FWCHECK | FLAG_CFGCHECK, osWaitForever, false);
+
+    switch (flags_read) {
+    case FLAG_UPLOAD:
+      mdm_sem.acquire();
+      //   upload_log(logpath);
+      //   bmqtt_cnt = (modem->mqtt_connect_stat() == 1) ? true : false;
+
+      if (bmqtt_cnt && (!get_mdm_busy())) {
+
+        printf("\r\n<----- mqttpub task ----->\r\n");
+        set_notify_ready(false);
+        set_mdm_busy(true);
+
+        // set_rtc_msg((unsigned int)rtc_read());
+        // if (modem->mqtt_publish(mqtt_obj->mqttpub_topic,
+        //                         mqtt_obj->mqtt_payload)) {
+        //   printf("< ------------------------------------------------ >"
+        //   CRLF);
+        // }
+
+        FILE *textfile;
+        char line[256];
+
+        debug("logsize %S = %d bytes.\r\n", FULL_LOG_FILE_PATH,
+              ext.check_filesize(FULL_LOG_FILE_PATH, "r"));
+
+        textfile = fopen(FULL_LOG_FILE_PATH, "r");
+        if (textfile != NULL) {
+          volatile bool pub_complete = false;
+          volatile bool tflag = true;
+
+          //   while (fgets(line, 256, textfile)) {
+          while ((fgets(line, 256, textfile) != NULL) && tflag) {
+            // printf("\r\n%s\r\n", line);
+            int len = strlen(line);
+            line[len - 2] = '\0';
+            // modem->mqtt_publish(mqtt_obj->mqttpub_topic, line);
+
+            pub_complete =
+                tflag && modem->mqtt_publish(mqtt_obj->mqttpub_topic, line);
+            tflag = pub_complete;
+          }
+
+          fclose(textfile);
+
+          if (pub_complete) {
+            debug_if(remove(FULL_LOG_FILE_PATH) == 0,
+                     "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
+          }
+          //   debug_if(remove(FULL_LOG_FILE_PATH) == 0,
+          //            "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
+        } else {
+          debug("fopen log fail\r\n");
+        }
+
+        set_mdm_busy(false);
+      }
+      mdm_evt_flags.clear(flags_read);
+
+      mdm_sem.release();
+      break;
+
+    case FLAG_FWCHECK:
+      mdm_sem.acquire();
+
+      //   if (upgrade_firmware()) {
+      //     go_bootloader();
+      //   }
+
+      //   nav.first_fix = false;
+      mdm_evt_flags.clear(flags_read);
+
+      mdm_sem.release();
+      break;
+
+    case FLAG_CFGCHECK:
+      mdm_sem.acquire();
+      //   schedule_cfg_check();
+      mdm_evt_flags.clear(flags_read);
+
+      mdm_sem.release();
+      break;
+
+    default:
+      mdm_sem.acquire();
+      mdm_evt_flags.clear(flags_read);
+      mdm_sem.release();
+      break;
+    }
+  }
+}

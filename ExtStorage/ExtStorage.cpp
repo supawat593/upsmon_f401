@@ -183,14 +183,43 @@ void ExtStorage::write_data_log(char msg[256], char path[128]) {
   debug_if(file == NULL, "*** fopen logfile fail ! ***\r\n");
 
   if (file != NULL) {
+    // int len = strlen(temp_msg);
 
-    debug_if(strlen(temp_msg) > 0,
-             "<----- Log %s Appending ----->\r\nPayload-> %s\r\n", path,
-             temp_msg);
+    //     debug_if( len> 0,
+    //          "<----- Log %s Appending ----->\r\nPayload-> %s\r\n", path,
+    //          temp_msg);
+    // debug_if(strlen(temp_msg) > 0,
+    //          "<----- Log %s Appending ----->\r\nPayload-> %s\r\n", path,
+    //          temp_msg);
 
     fprintf(file, temp_msg);
+
+    int len = strlen(temp_msg);
+    temp_msg[len - 2] = '\0';
+
+    debug_if(len > 0, "<----- Log %s Appending ----->\r\nPayload-> %s\r\n",
+             path, temp_msg);
   }
 
   fclose(file);
   file_mtx.unlock();
+}
+
+int ExtStorage::check_filesize(char full_path[128], const char *fopen_mode) {
+  file_mtx.lock();
+  //   char full_path[128];
+  long len = 0;
+  //   sprintf(full_path, "/%s/%s", SPIF_MOUNT_PATH, path);
+  file = fopen(full_path, fopen_mode);
+
+  if (file != NULL) {
+    fseek(file, 0, SEEK_END);
+    len = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    fclose(file);
+  } else {
+    len = -1;
+  }
+  file_mtx.unlock();
+  return len;
 }
