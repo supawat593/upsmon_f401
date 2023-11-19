@@ -183,14 +183,6 @@ void ExtStorage::write_data_log(char msg[256], char path[128]) {
   debug_if(file == NULL, "*** fopen logfile fail ! ***\r\n");
 
   if (file != NULL) {
-    // int len = strlen(temp_msg);
-
-    //     debug_if( len> 0,
-    //          "<----- Log %s Appending ----->\r\nPayload-> %s\r\n", path,
-    //          temp_msg);
-    // debug_if(strlen(temp_msg) > 0,
-    //          "<----- Log %s Appending ----->\r\nPayload-> %s\r\n", path,
-    //          temp_msg);
 
     fprintf(file, temp_msg);
 
