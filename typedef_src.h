@@ -19,6 +19,7 @@ typedef struct {
   char full_cmd[64];
   char model[32];
   char siteID[32];
+  char Device[16];
 } init_script_t;
 
 typedef struct {
@@ -53,6 +54,7 @@ typedef struct {
 } mqttsub_notify_t;
 
 typedef struct {
+  char notify_buffer[512];
   char cereg_msg[64];
   char rxtopic_msg[512];
   mqttsub_notify_t mqttsub;

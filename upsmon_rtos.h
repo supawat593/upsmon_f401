@@ -36,6 +36,7 @@ public:
   char mqttpub_topic[128];
   char mqtt_stat_payload[512];
   char mqtt_stat_topic[128];
+  char mqtt_cfg_topic[128];
 
   CellularService *_cell;
   init_script_t *_script;
@@ -50,6 +51,7 @@ public:
     mqttpub_topic[0] = '\0';
     mqtt_stat_payload[0] = '\0';
     mqtt_stat_topic[0] = '\0';
+    mqtt_cfg_topic[0] = '\0';
   }
 
   void make_mqttPayload(mail_t *_data) {
@@ -90,6 +92,13 @@ public:
     strncpy(mqtt_stat_topic, stat_topic, strlen(stat_topic));
   }
 
+  void make_mqttCfgTopic() {
+    static char stat_topic[128];
+    sprintf(stat_topic, "%s/config/#", _script->topic_path);
+    memset(mqtt_cfg_topic, 0, 128);
+    strncpy(mqtt_cfg_topic, stat_topic, strlen(stat_topic));
+  }
+
 private:
 };
 
@@ -115,6 +124,16 @@ volatile bool is_notify_ready = false;
 
 unsigned int last_rtc_pub = 0;
 Mutex mtx_rtc_msg;
+
+unsigned int *uid = (unsigned int *)0x801bffc;
+unique_stat_t mydata;
+
+char *get_device_id() {
+  char tmp[16] = {0};
+  sprintf(tmp, "UPS%d", *uid);
+  memcpy(&mydata.uid, &tmp, strlen(tmp));
+  return (char *)&mydata.uid;
+}
 
 unsigned int get_rtc_pub() {
   unsigned int temp = 0;
@@ -396,7 +415,7 @@ int detection_notify(const char *keyword, char *src, char *dst) {
   }
 }
 
-int script_config_process(char cfg_msg[512]) {
+int script_config_process(char cfg_msg[512], CellularService *_modem) {
   char str_cmd[10][64];
   char raw_key[64];
   char delim[] = "&";
@@ -414,11 +433,25 @@ int script_config_process(char cfg_msg[512]) {
 
   char raw_usr[16], raw_pwd[16];
   int cfg_success = 0;
+  bool match_device = false;
 
   for (int i = 0; i < n_cmd; i++) {
 
     debug("str_cmd[%d] ---> %s\r\n", i, str_cmd[i]);
-    if (sscanf(str_cmd[i], "Command: [%[^]]]", script_bkp.full_cmd) == 1) {
+
+    if (sscanf(str_cmd[i], "Device: \"%[^\"]\"", script_bkp.Device) == 1) {
+
+      if (strcmp(script_bkp.Device, _modem->cell_info.imei) == 0) {
+        match_device = true;
+      } else if (strcmp(script_bkp.Device, get_device_id()) == 0) {
+        match_device = true;
+      } else {
+        match_device = false;
+      }
+    } else if (sscanf(str_cmd[i], "Command: [%[^]]]", script_bkp.full_cmd) ==
+               1) {
+      cfg_success++;
+    } else if (sscanf(str_cmd[i], "Broker: \"%[^\"]\"", script_bkp.broker)) {
       cfg_success++;
     } else if (sscanf(str_cmd[i], "Topic: \"%[^\"]\"", script_bkp.topic_path) ==
                1) {
@@ -486,46 +519,20 @@ int script_config_process(char cfg_msg[512]) {
         cfg_success++;
       }
     } else {
-      printf("Not Matched!\r\n");
+      printf("Pattern Check : Not Matched!\r\n");
     }
   }
 
-  return cfg_success;
+  debug_if(!match_device, "Not Matched or Authentication fail...\r\n");
+
+  //   return cfg_success;
+  return ((cfg_success > 0) && match_device) ? cfg_success : 0;
 }
-
-// void device_stat_update(CellularService *_obj, char *topic_path,
-//                         const char *stat_mode = "NORMAL") {
-
-//   char stat_payload[512];
-//   char stat_topic[128];
-//   char str_stat[15];
-//   strcpy(str_stat, stat_mode);
-//   sprintf(stat_topic, "%s/status/%s", topic_path, _obj->cell_info.imei);
-//   _obj->set_cereg(2);
-//   _obj->get_csq(&_obj->cell_info.sig, &_obj->cell_info.ber);
-//   _obj->get_cops(_obj->cell_info.cops_msg);
-
-//   memset(_obj->cell_info.cpsi_msg, 0, 128);
-//   _obj->get_cpsi(_obj->cell_info.cpsi_msg);
-
-//   if (_obj->get_cereg(_obj->cell_info.cereg_msg) > 0) {
-//     sprintf(stat_payload, stat_pattern, _obj->cell_info.imei,
-//             (unsigned int)rtc_read(), firmware_vers, Dev_Group, period_min,
-//             str_stat, _obj->cell_info.sig, _obj->cell_info.ber,
-//             _obj->cell_info.cops_msg, _obj->cell_info.cereg_msg,
-//             _obj->cell_info.cpsi_msg);
-//     _obj->mqtt_publish(stat_topic, stat_payload);
-//   }
-// }
 
 void device_stat_update(CellularService *_obj, mqttPayload *_mqttpayload,
                         const char *stat_mode = "NORMAL") {
-
-  //   char stat_payload[512];
-  //   char stat_topic[128];
   char str_stat[15];
   strcpy(str_stat, stat_mode);
-  //   sprintf(stat_topic, "%s/status/%s", topic_path, _obj->cell_info.imei);
   _mqttpayload->make_mqttStatTopic();
 
   _obj->set_cereg(2);
@@ -541,12 +548,4 @@ void device_stat_update(CellularService *_obj, mqttPayload *_mqttpayload,
     _obj->mqtt_publish(_mqttpayload->mqtt_stat_topic,
                        _mqttpayload->mqtt_stat_payload);
   }
-  //   if (_obj->get_cereg(_obj->cell_info.cereg_msg) > 0) {
-  //     sprintf(stat_payload, stat_pattern, _obj->cell_info.imei,
-  //             (unsigned int)rtc_read(), firmware_vers, Dev_Group, period_min,
-  //             str_stat, _obj->cell_info.sig, _obj->cell_info.ber,
-  //             _obj->cell_info.cops_msg, _obj->cell_info.cereg_msg,
-  //             _obj->cell_info.cpsi_msg);
-  //     _obj->mqtt_publish(stat_topic, stat_payload);
-  //   }
 }

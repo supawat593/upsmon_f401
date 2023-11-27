@@ -73,14 +73,6 @@ int last_utc_update_stat = 0;
 unsigned int last_rtc_check_NW = 0;
 unsigned int rtc_uptime = 0;
 
-char str_sub_topic[128];
-
-// Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
-//     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
-//     capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
-//     mdm_notify_thread(osPriorityNormal, 0x0c00, nullptr,
-//     "mdm_notify_thread");
-
 Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
     capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
@@ -95,11 +87,7 @@ EventFlags mdm_evt_flags;
 Semaphore mdm_sem(1);
 
 init_script_t init_script, iap_init_script;
-unique_stat_t mydata;
-
 mqttPayload *mqtt_obj = NULL;
-
-unsigned int *uid = (unsigned int *)0x801bffc;
 
 int i_cmd = 0;
 int len_mqttpayload = 0;
@@ -389,11 +377,12 @@ void mdm_notify_routine() {
         if (is_rx_mqtt) {
           //   debug("is_rx_mqtt: true\r\n");
 
-          if (script_config_process(oob_msg.mqttsub.sub_payload) > 0) {
+          if (script_config_process(oob_msg.mqttsub.sub_payload, modem) > 0) {
 
             debug("before write script file\r\n");
             ext.write_init_script(&script_bkp, FULL_SCRIPT_FILE_PATH);
             ext.deinit();
+            debug("configuration file have configured : Restart NOW! ...\r\n");
             system_reset();
           }
           is_rx_mqtt = false;
@@ -417,8 +406,7 @@ int main() {
   printf("----------------------------------------\r\n");
   printf("Firmware Version: %s" CRLF, firmware_vers);
   printf("SystemCoreClock : %.3f MHz.\r\n", SystemCoreClock / 1000000.0);
-  //   printf("timestamp : %d\r\n", (unsigned int)rtc_read());
-  printf("Serial Number: UPS%d\r\n", *uid);
+  printf("Serial Number: %s\r\n", get_device_id());
   printf("timestamp : %d\r\n", (unsigned int)time(NULL));
   printf("----------------------------------------\r\n");
   printf("\r\ncapture period : %d minutes\r\n", period_min);
@@ -450,7 +438,7 @@ int main() {
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
   modem = new CellularService(_parser, mdm_pwr, mdm_rst);
 
-  xtc232 = new ATCmdParser(&rs232, "\r", 256, 1000);
+  xtc232 = new ATCmdParser(&rs232, "\r", 256, 1500);
   ThisThread::sleep_for(500ms);
 
   mqtt_obj = new mqttPayload(&init_script, modem);
@@ -471,8 +459,6 @@ int main() {
   sys_time_ms = modem->read_systime_ms();
   modem->ctrl_timer(0);
 
-  //   modem->check_at_ready();
-  //   modem->check_modem_status(3) ? netstat_led(IDLE) : netstat_led(OFF);
   modem->check_at_ready() ? netstat_led(IDLE) : netstat_led(OFF);
 
   last_rtc_check_NW = (unsigned int)rtc_read();
@@ -521,11 +507,9 @@ int main() {
   }
 
   if (bmqtt_cnt) {
-    memset(str_sub_topic, 0, 128);
-    sprintf(str_sub_topic, "%s/config/%s", init_script.topic_path,
-            modem->cell_info.imei);
 
-    bmqtt_sub = modem->mqtt_sub(str_sub_topic);
+    mqtt_obj->make_mqttCfgTopic();
+    bmqtt_sub = modem->mqtt_sub(mqtt_obj->mqtt_cfg_topic);
 
     // if (bmqtt_sub) {
     //   set_notify_ready(true);
@@ -804,10 +788,9 @@ void maintain_connection() {
             debug_if(bmqtt_cnt, "MQTT Connected\r\n");
 
             if (bmqtt_cnt) {
-              memset(str_sub_topic, 0, 128);
-              sprintf(str_sub_topic, "%s/config/%s", init_script.topic_path,
-                      modem->cell_info.imei);
-              bmqtt_sub = modem->mqtt_sub(str_sub_topic);
+
+              mqtt_obj->make_mqttCfgTopic();
+              bmqtt_sub = modem->mqtt_sub(mqtt_obj->mqtt_cfg_topic);
             }
           }
         }
@@ -821,10 +804,9 @@ void maintain_connection() {
           debug_if(bmqtt_cnt, "MQTT Connected\r\n");
 
           if (bmqtt_cnt) {
-            memset(str_sub_topic, 0, 128);
-            sprintf(str_sub_topic, "%s/config/%s", init_script.topic_path,
-                    modem->cell_info.imei);
-            bmqtt_sub = modem->mqtt_sub(str_sub_topic);
+
+            mqtt_obj->make_mqttCfgTopic();
+            bmqtt_sub = modem->mqtt_sub(mqtt_obj->mqtt_cfg_topic);
           }
         }
       }
