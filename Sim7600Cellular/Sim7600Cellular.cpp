@@ -7,6 +7,7 @@
 Sim7600Cellular::Sim7600Cellular(ATCmdParser *_parser) : _atc(_parser) {}
 Sim7600Cellular::Sim7600Cellular(BufferedSerial *_serial) : serial(_serial) {
   _atc = new ATCmdParser(serial, "\r\n", 256, 8000);
+  debug("initial cellular module by bufferedserial argument\r\n");
 }
 
 Sim7600Cellular::Sim7600Cellular(PinName tx, PinName rx) {
@@ -254,6 +255,55 @@ int Sim7600Cellular::get_cclk(char *cclk) {
   return -1;
 }
 
+int Sim7600Cellular::get_cgdcont(int cid) {
+
+  char buff[512];
+  char rcv[16];
+  char ret[256];
+
+  sprintf(rcv, "+CGDCONT: %d", cid);
+
+  _atc->set_timeout(2000);
+  _atc->send("AT+CGDCONT?");
+  _atc->read(buff, 512);
+
+  _atc->set_timeout(8000);
+  _atc->flush();
+
+  int st = 0, end;
+  while ((strncmp(&buff[st], rcv, strlen(rcv)) != 0) && (st < 512)) {
+    st++;
+  }
+
+  end = st;
+  while ((strncmp(&buff[end], "\r\n", 2) != 0) && (end < 512)) {
+    end++;
+  }
+
+  memset(ret, 0, 256);
+  memcpy(&ret[0], &buff[st], end - st);
+
+  if (strlen(ret) > 0) {
+    debug("cgdcont cid=%d -> %s\r\n", cid, ret);
+    return 0;
+  }
+  debug("cgdcont cid=%d -> not configurated\r\n", cid);
+  return -1;
+}
+
+int Sim7600Cellular::set_cgdcont(int cid, char *apn, char *pdp_type) {
+
+  //   char cmd[128];
+  //   sprintf(cmd, "AT+CGDCONT=%d,\"%s\",\"%s\"", cid, pdp_type, apn);
+
+  //   if (_atc->send(cmd) && _atc->recv("OK")) {
+  if (_atc->send("AT+CGDCONT=%d,\"%s\",\"%s\"", cid, pdp_type, apn) &&
+      _atc->recv("OK")) {
+    debug("set cgdcont : cid=%d pdp_type=%s apn=%s\r\n", cid, pdp_type, apn);
+  }
+  return 0;
+}
+
 int Sim7600Cellular::set_creg(int n) {
   char cmd[10];
   sprintf(cmd, "AT+CREG=%d", n);
@@ -326,6 +376,49 @@ int Sim7600Cellular::get_cereg(char *payload) {
   }
   strcpy(payload, "");
   return -1;
+}
+
+int Sim7600Cellular::set_cgact(int cid, int state) {
+  char cmd[16];
+  sprintf(cmd, "AT+CGACT=%d,%d", state, cid);
+
+  if (_atc->send(cmd) && _atc->recv("OK")) {
+    debug_if(state == 1, "cid=%d : PDP Activated\r\n", cid);
+    debug_if(state == 0, "cid=%d : PDP Deactivated\r\n", cid);
+    return state;
+  }
+
+  debug("set_cgact : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::get_cgact(int cid) {
+  int xcid = -1;
+  int xstate = -1;
+  char buff[128];
+  char rcv[16];
+  char msg[12];
+
+  sprintf(rcv, "+CGACT: %d", cid);
+
+  _atc->send("AT+CGACT?");
+  _atc->read(buff, 128);
+
+  int st = 0;
+  while ((strncmp(&buff[st], rcv, strlen(rcv)) != 0) && (st < 128)) {
+    st++;
+  }
+
+  memset(msg, 0, 12);
+  memcpy(&msg[0], &buff[st], 11);
+
+  if (sscanf(msg, "+CGACT: %d,%d", &xcid, &xstate) == 2) {
+    debug("get_cgact: cid= %d state= %d\r\n", xcid, xstate);
+    return xstate;
+  }
+
+  debug_if(xstate < 0, "get_cgact : pattern check fail\r\n");
+  return xstate;
 }
 
 bool Sim7600Cellular::set_full_FUNCTION(int rst) {
@@ -604,6 +697,7 @@ bool Sim7600Cellular::mqtt_stop() {
     printf("mqtt stop --> Completed\r\n");
     bmqtt_start = true;
   }
+  debug_if(!bmqtt_start, "MQTT stop : Pattern Fail!\r\n");
   return bmqtt_start;
 }
 
@@ -614,6 +708,8 @@ bool Sim7600Cellular::mqtt_release(int clientindex) {
     printf("Release mqtt client : index %d\r\n", clientindex);
     return true;
   }
+
+  printf("Release mqtt client : Pattern Fail!\r\n");
   return false;
 }
 
@@ -721,6 +817,27 @@ int Sim7600Cellular::mqtt_isdisconnect(int clientindex) {
 
   debug("mqtt_isdisconnect pattern checking fail!\r\n");
   return -1;
+}
+
+int Sim7600Cellular::mqtt_disconnect(int client_index, int timeout_sec) {
+  char cmd[128];
+  int ret[2] = {-1, -1};
+  //   _atc->debug_on(1);
+  sprintf(cmd, "AT+CMQTTDISC=%d,%d", client_index, timeout_sec);
+
+  if ((_atc->send(cmd)) &&
+      (_atc->recv("+CMQTTDISC: %d,%d\r\n", &ret[0], &ret[1]))) {
+
+    debug_if((ret[0] == client_index) && (ret[1] == 0),
+             "client_index=%d : MQTT Disconnected\r\n", client_index);
+
+    debug("mqtt_disconnect -> pattern checked : index=%d err=%d\r\n", ret[0],
+          ret[1]);
+  }
+
+  //   _atc->debug_on(0);
+  debug_if(ret[1] < 0, "mqtt_disconnect pattern checking fail!\r\n");
+  return ret[1];
 }
 
 bool Sim7600Cellular::mqtt_publish(char topic[128], char payload[512], int qos,
@@ -847,6 +964,282 @@ bool Sim7600Cellular::mqtt_unsub(char topic[128], int clientindex, int dup) {
 
   _atc->set_timeout(8000);
   return false;
+}
+
+bool Sim7600Cellular::http_start() {
+  bool ret = false;
+  _atc->set_timeout(30000);
+
+  if (_atc->send("AT+HTTPINIT") && _atc->recv("OK")) {
+    ret = true;
+  }
+
+  debug_if(!ret, "http_start() : checking pattern fail\r\n");
+  _atc->set_timeout(8000);
+  return ret;
+}
+
+bool Sim7600Cellular::http_stop() {
+  bool ret = false;
+  _atc->set_timeout(30000);
+
+  if (_atc->send("AT+HTTPTERM") && _atc->recv("OK")) {
+    ret = true;
+  }
+
+  debug_if(!ret, "http_stop() : checking pattern fail\r\n");
+  _atc->set_timeout(8000);
+  return ret;
+}
+
+bool Sim7600Cellular::http_set_parameter(char url[128], int content,
+                                         int readmode) {
+
+  bool ret = false;
+  bool temp = false;
+  _atc->set_timeout(30000);
+
+  if (_atc->send("AT+HTTPPARA=\"URL\",\"%s\"", url) && _atc->recv("OK")) {
+    debug("set parameter : url -> %s\r\n", url);
+    temp = true;
+  }
+
+  if (content == 0) {
+    ret = temp && _atc->send("AT+HTTPPARA=\"CONTENT\",\"%s\"", "text/plain") &&
+          _atc->recv("OK");
+    temp = ret;
+  } else if (content == 1) {
+    ret = temp &&
+          _atc->send("AT+HTTPPARA=\"CONTENT\",\"%s\"",
+                     "application/octet-stream") &&
+          _atc->recv("OK");
+    temp = ret;
+  } else {
+    ret = temp &&
+          _atc->send("AT+HTTPPARA=\"CONTENT\",\"%s\"", "mutipart/form-data") &&
+          _atc->recv("OK");
+    temp = ret;
+  }
+
+  ret = temp && _atc->send("AT+HTTPPARA=\"READMODE\",%d", readmode) &&
+        _atc->recv("OK");
+
+  debug_if(!ret, "http_set_parameter() : checking pattern fail\r\n");
+  _atc->set_timeout(8000);
+  return ret;
+}
+
+bool Sim7600Cellular::http_method_action(int *datalen, int method) {
+
+  bool ret = false;
+  int status = -1;
+  _atc->set_timeout(30000);
+
+  if (_atc->send("AT+HTTPACTION=%d", method) && _atc->recv("OK") &&
+      _atc->recv("+HTTPACTION : %d,%d,%d", &method, &status, datalen)) {
+    debug("http_method_action -> method=%d status=%d datalen=%d\r\n", method,
+          status, *datalen);
+    ret = (status == 200) ? true : false;
+  }
+  debug_if(!ret, "http_method_action() : checking pattern fail\r\n");
+  _atc->set_timeout(8000);
+  return ret;
+}
+
+bool Sim7600Cellular::http_read_header(char *rxbuf, int *datalen) {
+  bool ret = false;
+  char buf[2][1024];
+  int i = 0;
+  _atc->debug_on(1);
+  _atc->set_timeout(30000);
+  _atc->send("AT+HTTPHEAD");
+
+  while (serial->readable()) {
+    serial->read(buf[0] + i, 1);
+    i++;
+  }
+
+  printHEX((unsigned char *)buf[0], i);
+
+  int st = 0, end = 0;
+  while ((memcmp(&buf[0][st], "+HTTPHEAD: ", 11) != 0) && (st < i)) {
+    st++;
+  }
+
+  while ((memcmp(&buf[0][end], "OK", 2) != 0) && (end < i)) {
+    end++;
+  }
+
+  if ((st < i) && (end < i)) {
+    for (int j = 0; j < (end - st + 2); j++) {
+      buf[1][j] = buf[0][st + j];
+    }
+
+    printHEX((unsigned char *)buf[1], end - st + 2);
+    debug("buf[1] = %s\r\n", buf[1]);
+
+    int len_header = -1;
+
+    if (sscanf(buf[1], "+HTTPHEAD: %d\r\n", &len_header) == 1) {
+      char dummy[32];
+      int len_dummy = -1;
+      sprintf(dummy, "+HTTPHEAD: %d\r\n", len_header);
+      len_dummy = strlen(dummy);
+      memset(buf[0], 0, 1024);
+
+      for (int j = 0; j < len_header; j++) {
+        buf[0][j] = buf[1][j + len_dummy];
+      }
+
+      printf("header = %s\r\n", buf[0]);
+    }
+
+    ret = true;
+  }
+
+  debug_if(!ret, "http_read_header() : checking pattern fail\r\n");
+  _atc->set_timeout(8000);
+  _atc->debug_on(0);
+  return ret;
+}
+
+bool Sim7600Cellular::http_getsize_data(int *datalen) {
+  bool ret = false;
+  //   _atc->debug_on(1);
+  _atc->set_timeout(30000);
+  if (_atc->send("AT+HTTPREAD?") && _atc->recv("+HTTPREAD: LEN,%d", datalen) &&
+      _atc->recv("OK")) {
+
+    ret = true;
+  }
+
+  debug_if(!ret, "http_getsize_data() : checking pattern fail\r\n");
+  _atc->set_timeout(8000);
+  //   _atc->debug_on(0);
+  return ret;
+}
+
+// bool Sim7600Cellular::http_read_data(char *rxbuf, int offset, int datalen) {
+//   bool ret = false;
+//   char buf[2][4200];
+//   int i = 0;
+//   //   _atc->debug_on(1);
+//   _atc->set_timeout(30000);
+//   //   if (_atc->send("AT+HTTPREAD=%d,%d", offset, datalen)) {
+//   if (_atc->send("AT+HTTPREAD=%d,%d", offset, datalen) && _atc->recv("OK")) {
+
+//     while (serial->readable()) {
+//       serial->read(buf[0] + i, 1);
+//       i++;
+//     }
+
+//     debug("http_read_data\r\n");
+//     printHEX((unsigned char *)buf[0], i);
+
+//     int st = 0, end = 0;
+//     while ((memcmp(&buf[0][st], "+HTTPREAD: ", 11) != 0) && (st < i)) {
+//       st++;
+//     }
+
+//     while ((memcmp(&buf[0][end], "+HTTPREAD: 0", 12) != 0) && (end < i)) {
+//       end++;
+//     }
+
+//     if ((st < i) && (end < i)) {
+//       for (int j = 0; j < (end - st); j++) {
+//         buf[1][j] = buf[0][st + j];
+//       }
+
+//       printHEX((unsigned char *)buf[1], end - st);
+//       debug("buf[1] = %s\r\n", buf[1]);
+
+//       int len_data = -1;
+
+//       if (sscanf(buf[1], "+HTTPREAD: %d\r\n", &len_data) == 1) {
+//         char dummy[32];
+//         int len_dummy = -1;
+//         sprintf(dummy, "+HTTPREAD: %d\r\n", len_data);
+//         len_dummy = strlen(dummy);
+//         memset(buf[0], 0, end - st);
+
+//         for (int j = 0; j < len_data; j++) {
+//           buf[0][j] = buf[1][j + len_dummy];
+//         }
+//         printHEX((unsigned char *)buf[0], len_data);
+//         printf("data = %s\r\n", buf[0]);
+//       }
+
+//       ret = true;
+//     }
+//   }
+//   debug_if(!ret, "http_read_data() : checking pattern fail\r\n");
+//   _atc->set_timeout(8000);
+//   //   _atc->debug_on(0);
+//   return ret;
+// }
+
+bool Sim7600Cellular::http_read_data(char *rxbuf, int offset, int datalen) {
+  bool ret = false;
+  char buf[2][4200];
+  int xlen = datalen + 100;
+  int i = 0;
+
+  //   _atc->debug_on(1);
+  _atc->set_timeout(30000);
+  //   if (_atc->send("AT+HTTPREAD=%d,%d", offset, datalen)) {
+  if (_atc->send("AT+HTTPREAD=%d,%d", offset, datalen) && _atc->recv("OK")) {
+
+    _atc->set_timeout(2000);
+    // while (serial->readable()) {
+    //   serial->read(buf[0] + i, 1);
+    //   i++;
+    // }
+
+    _atc->read(buf[0], xlen);
+
+    debug("http_read_data\r\n");
+    // printHEX((unsigned char *)buf[0], xlen);
+
+    int st = 0, end = 0;
+    while ((memcmp(&buf[0][st], "+HTTPREAD: ", 11) != 0) && (st < xlen)) {
+      st++;
+    }
+
+    while ((memcmp(&buf[0][end], "+HTTPREAD: 0", 12) != 0) && (end < xlen)) {
+      end++;
+    }
+
+    if ((st < xlen) && (end < xlen)) {
+      for (int j = 0; j < (end - st); j++) {
+        buf[1][j] = buf[0][st + j];
+      }
+
+      printHEX((unsigned char *)buf[1], end - st);
+      //   debug("buf[1] = %s\r\n", buf[1]);
+
+      int len_data = -1;
+
+      if (sscanf(buf[1], "+HTTPREAD: %d\r\n", &len_data) == 1) {
+        char dummy[32];
+        int len_dummy = -1;
+        sprintf(dummy, "+HTTPREAD: %d\r\n", len_data);
+        len_dummy = strlen(dummy);
+        memset(buf[0], 0xff, end - st);
+
+        for (int j = 0; j < len_data; j++) {
+          buf[0][j] = buf[1][j + len_dummy];
+        }
+        printHEX((unsigned char *)buf[0], len_data);
+        // printf("data = %s\r\n", buf[0]);
+      }
+
+      ret = true;
+    }
+  }
+  debug_if(!ret, "http_read_data() : checking pattern fail\r\n");
+  _atc->set_timeout(8000);
+  //   _atc->debug_on(0);
+  return ret;
 }
 
 int Sim7600Cellular::read_atc_to_char(char *tbuf, int size, char end) {

@@ -66,4 +66,19 @@ typedef struct {
   char pwd[32];
 } unique_stat_t;
 
+typedef struct {
+  bool flag_mqtt_start;
+  bool flag_mqtt_connect;
+  bool flag_mqtt_sub;
+  int rty_mqtt_cnt;
+} mqtt_flag_t;
+
+typedef struct {
+  int rty_at;
+  int rty_creg;
+  bool flag_atok;
+  bool flag_attach;
+  mqtt_flag_t mqtt_flag;
+} param_mqtt_t;
+
 #endif

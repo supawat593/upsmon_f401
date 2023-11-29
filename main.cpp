@@ -77,14 +77,21 @@ Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
     capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
     mdm_notify_thread(osPriorityNormal, 0x0c00, nullptr, "mdm_notify_thread"),
-    cellular_thread(osPriorityNormal, 0x2000, nullptr, "cellular_thread");
+    cellular_thread(osPriorityNormal, 0x1000, nullptr, "cellular_thread");
+
+// Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
+//     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
+//     capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
+//     cellular_thread(osPriorityNormal, 0x1000, nullptr, "cellular_thread");
 
 Thread *usb_thread;
 Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
 
 EventQueue isr_queue;
 EventFlags mdm_evt_flags;
+
 Semaphore mdm_sem(1);
+Semaphore capture_sem(1);
 
 init_script_t init_script, iap_init_script;
 mqttPayload *mqtt_obj = NULL;
@@ -93,7 +100,17 @@ int i_cmd = 0;
 int len_mqttpayload = 0;
 
 void cellular_task();
-void maintain_connection();
+// void mqtt_init();
+void mqtt_init(param_mqtt_t *param);
+// void maintain_connection();
+void maintain_connection(param_mqtt_t *param);
+
+void reset_mqtt_flag(param_mqtt_t *param) {
+  param->mqtt_flag.flag_mqtt_start = false;
+  param->mqtt_flag.flag_mqtt_connect = false;
+  param->mqtt_flag.flag_mqtt_sub = false;
+  param->mqtt_flag.rty_mqtt_cnt = 0;
+}
 
 uint8_t read_dipsw() { return (~dipsw.read()) & 0x0f; }
 
@@ -159,7 +176,7 @@ void usb_passthrough() {
 }
 
 void capture_thread_routine() {
-
+  capture_sem.acquire();
   char ret_rs232[128];
   char str_cmd[6][20];
 
@@ -182,6 +199,7 @@ void capture_thread_routine() {
 
   i_cmd = n_cmd;
   printf("---> start Capture Thread <---\r\n");
+  capture_sem.release();
 
   while (true) {
     // printf("*********************************" CRLF);
@@ -437,89 +455,25 @@ int main() {
 
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
   modem = new CellularService(_parser, mdm_pwr, mdm_rst);
+  //   modem = new CellularService(&mdm, mdm_pwr, mdm_rst);
 
   xtc232 = new ATCmdParser(&rs232, "\r", 256, 1500);
   ThisThread::sleep_for(500ms);
 
   mqtt_obj = new mqttPayload(&init_script, modem);
 
-  vrf_en = 1;
-  modem->powerkey_trig_mode(1);
-
-  modem->ctrl_timer(1);
-  int sys_time_ms = modem->read_systime_ms();
-
-  while (mdm_status.read() && (modem->read_systime_ms() - sys_time_ms < 18000))
-    ThisThread::sleep_for(250ms);
-
-  debug_if(modem->read_systime_ms() - sys_time_ms > 18000,
-           "MDM_STAT Timeout : %d sec.\r\n",
-           modem->read_systime_ms() - sys_time_ms);
-
-  sys_time_ms = modem->read_systime_ms();
-  modem->ctrl_timer(0);
-
-  modem->check_at_ready() ? netstat_led(IDLE) : netstat_led(OFF);
-
-  last_rtc_check_NW = (unsigned int)rtc_read();
-  if (ext.get_script_flag() && modem->initial_NW()) {
-    netstat_led(CONNECTED);
-  }
-
-  char msg_ati[128] = {0};
-  modem->get_ati(msg_ati);
-  debug_if(strlen(msg_ati) > 0,
-           "\r\n------ ATI Return mesg. "
-           "------\r\n%s\r\n------------------------------\r\n\r\n",
-           msg_ati);
-
-  modem->ntp_setup();
-
-  if (modem->get_cclk(modem->cell_info.cclk_msg)) {
-    modem->sync_rtc(modem->cell_info.cclk_msg);
-    printf("timestamp : %d\r\n", (unsigned int)rtc_read());
-  }
-
-  last_utc_rtc_sync = (int)rtc_read();
-
-  bmqtt_start = modem->mqtt_start();
-  debug_if(bmqtt_start, "MQTT Started\r\n");
-
-  if (bmqtt_start) {
-
-    modem->mqtt_accquire_client(modem->cell_info.imei);
-
-    if (modem->dns_resolve(init_script.broker, modem->cell_info.dns_ip) < 0) {
-      memset(modem->cell_info.dns_ip, 0, 16);
-      strcpy(modem->cell_info.dns_ip, mqtt_broker_ip);
-    }
-
-    bmqtt_cnt = modem->mqtt_connect(modem->cell_info.dns_ip, init_script.usr,
-                                    init_script.pwd, init_script.port);
-    debug_if(bmqtt_cnt, "MQTT Connected\r\n");
-    device_stat_update(modem, mqtt_obj, "RESTART");
-    last_utc_update_stat = (int)rtc_read();
-  }
-
   if (ext.get_script_flag()) {
     blink_led(NORMAL); //  normal Mode
     set_mdm_busy(false);
   }
 
-  if (bmqtt_cnt) {
+  //   mdm_notify_thread.start(callback(mdm_notify_routine));
 
-    mqtt_obj->make_mqttCfgTopic();
-    bmqtt_sub = modem->mqtt_sub(mqtt_obj->mqtt_cfg_topic);
-
-    // if (bmqtt_sub) {
-    //   set_notify_ready(true);
-    // }
-  }
-
-  mdm_notify_thread.start(callback(mdm_notify_routine));
-  capture_thread.start(callback(capture_thread_routine));
+  //   capture_thread.start(callback(capture_thread_routine));
   //   usb_thread.start(callback(usb_passthrough));
   cellular_thread.start(callback(cellular_task));
+  capture_thread.start(callback(capture_thread_routine));
+  mdm_notify_thread.start(callback(mdm_notify_routine));
 
   while (true) {
 
@@ -591,8 +545,53 @@ int main() {
 
 void cellular_task() {
 
+  param_mqtt_t param_mqtt = {0, 0, false, false, {false, false, false, 0}};
+
+  //   char url_http[128] =
+  //   "http://vms.mydevice.cloud/~tun/upsmon_dummy_1000.bin";
+  //   char url_http[128] = "http://vms.mydevice.cloud/~tun/test4.txt";
+  char url_http[128] = "http://vms.mydevice.cloud/~tun/test2.txt";
+
+  capture_sem.acquire();
   unsigned long flags_read = 0;
   printf("Starting cellular_task()        : %p\r\n", ThisThread::get_id());
+  mqtt_init(&param_mqtt);
+
+  //   application/octet-stream
+
+  //   modem->set_cgdcont(2);
+  //   modem->set_cgact(2);
+
+  //   modem->get_cgact(2);
+
+  //   if (modem->http_start()) {
+  //     modem->http_set_parameter(url_http, 0, 1);
+
+  //     int len = 0;
+  //     debug_if(modem->http_method_action(&len), "method_action
+  //     datalen=%d\r\n",
+  //              len);
+
+  //     char rxbuf[1100];
+  //     debug_if(modem->http_read_header(rxbuf, &len),
+  //              "read_header datalen = % d\r\n ", len);
+
+  //     debug_if(modem->http_getsize_data(&len), "getsize_data datalen=%d\r\n",
+  //              len);
+
+  //     if (len > 0) {
+
+  //       modem->http_read_data(rxbuf, 0, len);
+  //     }
+
+  //     modem->http_stop();
+
+  //     //   if (bmqtt_sub) {
+  //     //     set_notify_ready(true);
+  //     //   }
+  //   }
+
+  capture_sem.release();
 
   while (true) {
 
@@ -604,7 +603,7 @@ void cellular_task() {
     case FLAG_UPLOAD:
       mdm_sem.acquire();
 
-      if (bmqtt_cnt) {
+      if (param_mqtt.mqtt_flag.flag_mqtt_connect) {
 
         printf("\r\n<----- mqttpub task ----->\r\n");
         set_notify_ready(false);
@@ -662,7 +661,8 @@ void cellular_task() {
 
     case FLAG_CONNECTION:
       mdm_sem.acquire();
-      maintain_connection();
+      //   maintain_connection();
+      maintain_connection(&param_mqtt);
       mdm_evt_flags.clear(flags_read);
 
       mdm_sem.release();
@@ -690,7 +690,75 @@ void cellular_task() {
   }
 }
 
-void maintain_connection() {
+void mqtt_init(param_mqtt_t *param) {
+
+  vrf_en = 1;
+  modem->powerkey_trig_mode(1);
+
+  modem->ctrl_timer(1);
+  int sys_time_ms = modem->read_systime_ms();
+
+  while (mdm_status.read() && (modem->read_systime_ms() - sys_time_ms < 18000))
+    ThisThread::sleep_for(250ms);
+
+  debug_if(modem->read_systime_ms() - sys_time_ms > 18000,
+           "MDM_STAT Timeout : %d sec.\r\n",
+           modem->read_systime_ms() - sys_time_ms);
+
+  sys_time_ms = modem->read_systime_ms();
+  modem->ctrl_timer(0);
+
+  modem->check_at_ready() ? netstat_led(IDLE) : netstat_led(OFF);
+
+  last_rtc_check_NW = (unsigned int)rtc_read();
+  if (ext.get_script_flag() && modem->initial_NW()) {
+    netstat_led(CONNECTED);
+  }
+
+  char msg_ati[128] = {0};
+  modem->get_ati(msg_ati);
+  debug_if(strlen(msg_ati) > 0,
+           "\r\n------ ATI Return mesg. "
+           "------\r\n%s\r\n------------------------------\r\n\r\n",
+           msg_ati);
+
+  modem->ntp_setup();
+
+  if (modem->get_cclk(modem->cell_info.cclk_msg)) {
+    modem->sync_rtc(modem->cell_info.cclk_msg);
+    printf("timestamp : %d\r\n", (unsigned int)rtc_read());
+  }
+
+  last_utc_rtc_sync = (int)rtc_read();
+
+  param->mqtt_flag.flag_mqtt_start = modem->mqtt_start();
+  debug_if(param->mqtt_flag.flag_mqtt_start, "MQTT Started\r\n");
+
+  if (param->mqtt_flag.flag_mqtt_start) {
+
+    modem->mqtt_accquire_client(modem->cell_info.imei);
+
+    if (modem->dns_resolve(init_script.broker, modem->cell_info.dns_ip) < 0) {
+      memset(modem->cell_info.dns_ip, 0, 16);
+      strcpy(modem->cell_info.dns_ip, mqtt_broker_ip);
+    }
+
+    param->mqtt_flag.flag_mqtt_connect =
+        modem->mqtt_connect(modem->cell_info.dns_ip, init_script.usr,
+                            init_script.pwd, init_script.port);
+    debug_if(param->mqtt_flag.flag_mqtt_connect, "MQTT Connected\r\n");
+    device_stat_update(modem, mqtt_obj, "RESTART");
+    last_utc_update_stat = (int)rtc_read();
+  }
+
+  if (param->mqtt_flag.flag_mqtt_connect) {
+
+    mqtt_obj->make_mqttCfgTopic();
+    param->mqtt_flag.flag_mqtt_sub = modem->mqtt_sub(mqtt_obj->mqtt_cfg_topic);
+  }
+}
+
+void maintain_connection(param_mqtt_t *param) {
 
   last_rtc_check_NW = (unsigned int)rtc_read();
   printf(CRLF "<----- Checking NW. Status ----->" CRLF);
@@ -700,46 +768,45 @@ void maintain_connection() {
   set_mdm_busy(true);
 
   // check AT>OK
-  if (!modem->check_modem_status(10)) {
+  param->flag_atok = modem->check_modem_status(10);
+
+  if (!param->flag_atok) {
     netstat_led(OFF);
 
-    vrf_en = 0;
-    ThisThread::sleep_for(500ms);
-    vrf_en = 1;
+    param->rty_at++;
+    debug("rty_at=%d\r\n", param->rty_at);
 
-    modem->powerkey_trig_mode(1);
+    if (param->rty_at > 5) {
+      param->rty_at = 0;
 
-    bmqtt_start = false;
-    bmqtt_cnt = false;
-    bmqtt_sub = false;
+      if (mdm_status.read() == 0) {
+        modem->powerkey_trig_mode(false);
+      }
 
-    rtc_uptime = (unsigned int)rtc_read();
+      vrf_en = 0;
+      ThisThread::sleep_for(500ms);
+      vrf_en = 1;
+      modem->powerkey_trig_mode();
+      reset_mqtt_flag(param);
 
-    while (mdm_status.read() && ((unsigned int)rtc_read() - rtc_uptime < 18))
-      ;
+    } else {
+      if (mdm_status.read() == 0) {
+        modem->MDM_HW_reset();
+        reset_mqtt_flag(param);
 
-    if ((unsigned int)rtc_read() - rtc_uptime > 18) {
-      printf("MDM_STAT Timeout : %d sec.\r\n",
-             (unsigned int)rtc_read() - rtc_uptime);
-      rtc_uptime = (unsigned int)rtc_read();
-    }
-    //   modem->check_at_ready();
-    //   mdmOK = modem->check_modem_status();
-    mdmOK = modem->check_at_ready() && modem->check_modem_status();
-
-    if (mdmOK) {
-      printf("Power re-attached -> SIM7600 Status: Ready\r\n");
-      netstat_led(IDLE);
-
-      if (modem->set_full_FUNCTION()) {
-        printf("AT Command and set full_function : OK\r\n");
-        modem->set_creg(2);
-        modem->set_cereg(2);
-        mdmAtt = modem->check_attachNW();
+      } else {
+        vrf_en = 0;
+        ThisThread::sleep_for(500ms);
+        vrf_en = 1;
+        modem->powerkey_trig_mode();
+        reset_mqtt_flag(param);
       }
     }
 
+    netstat_led(IDLE);
+
   } else {
+    param->rty_at = 0;
 
     if ((int)rtc_read() - last_utc_rtc_sync > 300) {
       memset(modem->cell_info.cclk_msg, 0, 32);
@@ -757,16 +824,45 @@ void maintain_connection() {
     debug_if(modem->get_cpsi(modem->cell_info.cpsi_msg), "cpsi=> %s\r\n ",
              modem->cell_info.cpsi_msg);
 
-    mdmAtt = modem->check_attachNW();
-    if (mdmAtt && (modem->get_creg() == 1)) {
+    param->flag_attach = modem->check_attachNW();
+
+    if (param->flag_attach && (modem->get_creg() == 1)) {
+      param->rty_creg = 0;
 
       netstat_led(CONNECTED);
       debug_if(modem->get_IPAddr(modem->cell_info.ipaddr), "ipaddr= %s\r\n",
                modem->cell_info.ipaddr);
 
-      if (!bmqtt_start) {
-        mdmAtt = modem->check_attachNW();
-        if (mdmAtt && (modem->get_creg() == 1)) {
+      param->mqtt_flag.flag_mqtt_connect =
+          (modem->mqtt_connect_stat() == 1) ? true : false;
+
+      if (!param->mqtt_flag.flag_mqtt_connect) {
+        param->mqtt_flag.rty_mqtt_cnt++;
+        debug("rty_mqtt_cnt=%d\r\n", param->mqtt_flag.rty_mqtt_cnt);
+
+        if (param->mqtt_flag.rty_mqtt_cnt > 5) {
+
+          param->mqtt_flag.rty_mqtt_cnt = 0;
+
+          if (mdm_status.read() == 0) {
+            modem->powerkey_trig_mode(false);
+          }
+
+          vrf_en = 0;
+          ThisThread::sleep_for(500ms);
+          vrf_en = 1;
+          modem->powerkey_trig_mode();
+          reset_mqtt_flag(param);
+        } else {
+          reset_mqtt_flag(param);
+          modem->mqtt_disconnect();
+          modem->mqtt_release();
+          modem->mqtt_stop();
+        }
+
+        param->flag_attach = modem->check_attachNW();
+
+        if (param->flag_attach && (modem->get_creg() == 1)) {
 
           netstat_led(CONNECTED);
 
@@ -776,125 +872,64 @@ void maintain_connection() {
             strcpy(modem->cell_info.dns_ip, mqtt_broker_ip);
           }
 
-          bmqtt_start = modem->mqtt_start();
-          debug_if(bmqtt_start, "MQTT Started\r\n");
+          param->mqtt_flag.flag_mqtt_start = modem->mqtt_start();
+          debug_if(param->mqtt_flag.flag_mqtt_start, "MQTT Started\r\n");
 
-          if (bmqtt_start) {
+          if (param->mqtt_flag.flag_mqtt_start) {
             modem->mqtt_accquire_client(modem->cell_info.imei);
 
-            bmqtt_cnt =
+            param->mqtt_flag.flag_mqtt_connect =
                 modem->mqtt_connect(modem->cell_info.dns_ip, init_script.usr,
                                     init_script.pwd, init_script.port);
-            debug_if(bmqtt_cnt, "MQTT Connected\r\n");
-
-            if (bmqtt_cnt) {
-
-              mqtt_obj->make_mqttCfgTopic();
-              bmqtt_sub = modem->mqtt_sub(mqtt_obj->mqtt_cfg_topic);
-            }
+            debug_if(param->mqtt_flag.flag_mqtt_connect, "MQTT Connected\r\n");
           }
         }
-      }
 
-      if (modem->mqtt_connect_stat() < 1) {
-        if (bmqtt_start) {
-          bmqtt_cnt =
-              modem->mqtt_connect(modem->cell_info.dns_ip, init_script.usr,
-                                  init_script.pwd, init_script.port);
-          debug_if(bmqtt_cnt, "MQTT Connected\r\n");
-
-          if (bmqtt_cnt) {
-
-            mqtt_obj->make_mqttCfgTopic();
-            bmqtt_sub = modem->mqtt_sub(mqtt_obj->mqtt_cfg_topic);
-          }
-        }
-      }
-
-      if (modem->mqtt_isdisconnect() < 1) {
-        bmqtt_cnt = false;
-        bmqtt_sub = false;
-
-        if (modem->mqtt_release()) {
-
-          if (modem->mqtt_stop()) {
-            bmqtt_start = false;
-          } else {
-
-            bmqtt_start = false;
-            netstat_led(OFF);
-
-            if ((!modem->check_modem_status(3)) && (!mdm_status.read())) {
-              modem->MDM_HW_reset();
-
-              printf("NW Attaching Fail: Rebooting Modem!!!" CRLF);
-
-              rtc_uptime = (unsigned int)rtc_read();
-              while (mdm_status.read() &&
-                     ((unsigned int)rtc_read() - rtc_uptime < 18))
-                ;
-
-              modem->check_at_ready();
-            }
-
-            if (modem->check_modem_status(10)) {
-
-              if (modem->get_cfun_mode() == 1) {
-                //   modem->initial_NW();
-                modem->set_min_cFunction();
-                modem->set_full_FUNCTION();
-              } else {
-                modem->set_cops();
-                modem->set_full_FUNCTION();
-              }
-
-              netstat_led(IDLE);
-            }
-          }
-        }
       } else {
-        bmqtt_cnt = true;
-      }
 
-      if (((unsigned int)rtc_read() - last_utc_update_stat) > 3600) {
+        if (!param->mqtt_flag.flag_mqtt_sub) {
 
-        last_utc_update_stat = (int)rtc_read();
-        printf("last_utc_update_stat : %d\r\n", last_utc_update_stat);
-        //   device_stat_update(modem, init_script.topic_path);
-        device_stat_update(modem, mqtt_obj);
-      }
-
-    } else {
-      netstat_led(OFF);
-      bmqtt_start = false;
-      bmqtt_cnt = false;
-      bmqtt_sub = false;
-
-      if ((!modem->check_modem_status(3)) && (!mdm_status.read())) {
-        modem->MDM_HW_reset();
-
-        printf("NW Attaching Fail: Rebooting Modem!!!" CRLF);
-
-        rtc_uptime = (unsigned int)rtc_read();
-        while (mdm_status.read() &&
-               ((unsigned int)rtc_read() - rtc_uptime < 18))
-          ;
-
-        modem->check_at_ready();
-      }
-
-      if (modem->check_modem_status(10)) {
-
-        if (modem->get_cfun_mode() == 1) {
-          // modem->initial_NW();
-          modem->set_min_cFunction();
-          modem->set_full_FUNCTION();
-        } else {
-          modem->set_cops();
-          modem->set_full_FUNCTION();
+          mqtt_obj->make_mqttCfgTopic();
+          param->mqtt_flag.flag_mqtt_sub =
+              modem->mqtt_sub(mqtt_obj->mqtt_cfg_topic);
         }
 
-        netstat_led(IDLE);
+        if (((unsigned int)rtc_read() - last_utc_update_stat) > 3600) {
+
+          last_utc_update_stat = (int)rtc_read();
+          printf("last_utc_update_stat : %d\r\n", last_utc_update_stat);
+          //   device_stat_update(modem, init_script.topic_path);
+          device_stat_update(modem, mqtt_obj);
+        }
+      }
+    } else {
+      param->rty_creg++;
+
+      if (param->rty_creg > 5) {
+        param->rty_creg = 0;
+
+        if (mdm_status.read() == 0) {
+          modem->powerkey_trig_mode(false);
+        }
+
+        vrf_en = 0;
+        ThisThread::sleep_for(500ms);
+        vrf_en = 1;
+        modem->powerkey_trig_mode();
+        reset_mqtt_flag(param);
+
+      } else {
+        if (mdm_status.read() == 0) {
+          modem->MDM_HW_reset();
+          reset_mqtt_flag(param);
+
+        } else {
+          vrf_en = 0;
+          ThisThread::sleep_for(500ms);
+          vrf_en = 1;
+          modem->powerkey_trig_mode();
+          reset_mqtt_flag(param);
+        }
       }
     }
   }
@@ -902,7 +937,7 @@ void maintain_connection() {
 
   set_mdm_busy(false);
 
-  if (bmqtt_sub) {
+  if (param->mqtt_flag.flag_mqtt_sub) {
     set_notify_ready(true);
   }
 }

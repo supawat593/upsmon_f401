@@ -25,11 +25,15 @@ public:
   int get_cops(char *cops);
   int get_csq(int *power, int *ber, int retry = 10);
   int get_cclk(char *cclk);
+  int get_cgdcont(int cid);
+  int set_cgdcont(int cid, char *apn = "internet", char *pdp_type = "IPV4V6");
   int set_creg(int n);
   int get_creg();
   int get_creg(char *payload);
   int set_cereg(int n);
   int get_cereg(char *payload);
+  int set_cgact(int cid = 1, int state = 1);
+  int get_cgact(int cid = 1);
   bool set_full_FUNCTION(int rst = 0);
   bool set_min_cFunction();
   int get_cfun_mode();
@@ -60,10 +64,20 @@ public:
   int mqtt_connect_stat(void);
   int mqtt_connect_stat(char *ret_msg);
   int mqtt_isdisconnect(int clientindex = 0);
+  int mqtt_disconnect(int client_index = 0, int timeout_sec = 60);
   bool mqtt_publish(char topic[128], char payload[512], int qos = 1,
                     int interval_s = 60);
   bool mqtt_sub(char topic[128], int clientindex = 0, int qos = 1);
   bool mqtt_unsub(char topic[128], int clientindex = 0, int dup = 0);
+
+  bool http_start();
+  bool http_stop();
+  bool http_set_parameter(char url[128], int content = 0, int readmode = 0);
+  // method -> 0 = GET, 1 = POST, 2 = HEAD, 3 = DELETE, 4 = PUT
+  bool http_method_action(int *datalen, int method = 0);
+  bool http_read_header(char *rxbuf, int *datalen);
+  bool http_getsize_data(int *datalen);
+  bool http_read_data(char *rxbuf, int offset, int datalen);
 
   int read_atc_to_char(char *tbuf, int size, char end);
 
