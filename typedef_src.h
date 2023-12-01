@@ -36,14 +36,14 @@ typedef struct {
   char cclk_msg[32];
 } __attribute__((__packed__)) cellular_data_t;
 
-typedef struct {
-  char stat_payload[512];
-  char stat_topic[128];
-  char str_data_topic[128];
-  char str_data_msg[256];
-  char str_sub_topic[128];
+// typedef struct {
+//   char stat_payload[512];
+//   char stat_topic[128];
+//   char str_data_topic[128];
+//   char str_data_msg[256];
+//   char str_sub_topic[128];
 
-} mqtt_config_t;
+// } mqtt_config_t;
 
 typedef struct {
   char sub_topic[128];

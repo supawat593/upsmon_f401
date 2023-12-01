@@ -98,6 +98,7 @@ mqttPayload *mqtt_obj = NULL;
 
 int i_cmd = 0;
 int len_mqttpayload = 0;
+bool msg_rdy = false;
 
 void cellular_task();
 // void mqtt_init();
@@ -506,9 +507,17 @@ int main() {
 
       // test logging
       len_mqttpayload = strlen(mqtt_obj->mqtt_payload);
-      ext.write_data_log(mqtt_obj->mqtt_payload, (char *)FULL_LOG_FILE_PATH);
-      debug("logsize %S = %d bytes.\r\n", FULL_LOG_FILE_PATH,
-            ext.check_filesize(FULL_LOG_FILE_PATH, "r"));
+
+      msg_rdy = (mqtt_obj->mqtt_payload[0] == '{') &&
+                (mqtt_obj->mqtt_payload[len_mqttpayload - 1] == '}');
+
+      if ((len_mqttpayload > 0) && msg_rdy) {
+        ext.write_data_log(mqtt_obj->mqtt_payload, (char *)FULL_LOG_FILE_PATH);
+        debug("log path %s : size= %d bytes.\r\n", FULL_LOG_FILE_PATH,
+              ext.check_filesize(FULL_LOG_FILE_PATH, "r"));
+      }
+
+      debug_if(!msg_rdy, "mqttpayload compose fail\r\n");
       // end test logging
 
       mail_box.free(mail);
@@ -612,7 +621,7 @@ void cellular_task() {
         FILE *textfile;
         char line[256];
 
-        debug("logsize %S = %d bytes.\r\n", FULL_LOG_FILE_PATH,
+        debug("log path %s : size= %d bytes.\r\n", FULL_LOG_FILE_PATH,
               ext.check_filesize(FULL_LOG_FILE_PATH, "r"));
 
         textfile = fopen(FULL_LOG_FILE_PATH, "r");

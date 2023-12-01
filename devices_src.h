@@ -103,20 +103,21 @@ const char *str_ret[] = {
     "NO_RESP2",
     "NO_RESP3"};
 
-char init_cfg_pattern[] = {"%*[^\n]\nBroker: \"%[^\"]\"\nPort: %d\nKey: "
-                           "\"%[^\"]\"\nTopic: \"%[^\"]\"\nCommand: "
-                           "[%[^]]]\nModel: \"%[^\"]\"\nSite_ID: "
-                           "\"%[^\"]\"\n%*s"};
+const char init_cfg_pattern[] = {"%*[^\n]\nBroker: \"%[^\"]\"\nPort: %d\nKey: "
+                                 "\"%[^\"]\"\nTopic: \"%[^\"]\"\nCommand: "
+                                 "[%[^]]]\nModel: \"%[^\"]\"\nSite_ID: "
+                                 "\"%[^\"]\"\n%*s"};
 
-char init_cfg_write[] = {
+const char init_cfg_write[] = {
     "#Configuration file for UPS Monitor\r\n\r\nSTART:\r\nBroker: "
     "\"%s\"\r\nPort: %d\r\nKey: \"%s\"\r\nTopic: \"%s\"\r\nCommand: "
     "[%s]\r\nModel: \"%s\"\r\nSite_ID: \"%s\"\r\nSTOP:"};
 
-char payload_pattern[] = "{\"imei\":%s,\"utc\":%u,\"model\":\"%s\",\"site_ID\":"
-                         "\"%s\",\"cmd\":\"%s\",\"resp\":\"%s\"}";
+const char payload_pattern[] =
+    "{\"imei\":%s,\"utc\":%u,\"model\":\"%s\",\"site_ID\":"
+    "\"%s\",\"cmd\":\"%s\",\"resp\":\"%s\"}";
 
-char stat_pattern[] =
+const char stat_pattern[] =
     "{\"imei\":%s,\"utc\":%u,\"firm_vers\":\"%s\",\"dev_group\":"
     "\"%s\",\"period_min\":%u,\"stat_mode\":"
     "\"%s\",\"csq_stat\":\"+CSQ: "
@@ -125,8 +126,8 @@ char stat_pattern[] =
 char dummy_msg[] =
     "(224.4 000.0 000.0 204.0 220.5 000 000 50.9 385 380 108.4 24.0 IM";
 
-char mqtt_sub_topic_pattern[] = "+CMQTTRXTOPIC: %*d,%d\r\n"
-                                "%[^\r]\r\n"
-                                "+CMQTTRXPAYLOAD: %*d,%d\r\n"
-                                "%[^\r]\r\n"
-                                "+CMQTTRXEND: %d\r\n";
+const char mqtt_sub_topic_pattern[] = "+CMQTTRXTOPIC: %*d,%d\r\n"
+                                      "%[^\r]\r\n"
+                                      "+CMQTTRXPAYLOAD: %*d,%d\r\n"
+                                      "%[^\r]\r\n"
+                                      "+CMQTTRXEND: %d\r\n";

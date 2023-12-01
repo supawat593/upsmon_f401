@@ -54,49 +54,67 @@ public:
     mqtt_cfg_topic[0] = '\0';
   }
 
-  void make_mqttPayload(mail_t *_data) {
+  int make_mqttPayload(mail_t *_data) {
 
+    int len = 0;
     static char str_msg[256];
+    memset(str_msg, 0, 256);
 
-    sprintf(str_msg, payload_pattern, _cell->cell_info.imei, _data->utc,
-            _script->model, _script->siteID, _data->cmd, _data->resp);
+    len = sprintf(str_msg, payload_pattern, _cell->cell_info.imei, _data->utc,
+                  _script->model, _script->siteID, _data->cmd, _data->resp);
     memset(mqtt_payload, 0, 256);
-    strncpy(mqtt_payload, str_msg, strlen(str_msg));
+    strncpy(mqtt_payload, str_msg, len);
+    return len;
   }
 
-  void make_mqttPubTopic() {
+  int make_mqttPubTopic() {
+    int len = 0;
     static char str_pub_topic[128];
+    memset(str_pub_topic, 0, 128);
 
-    sprintf(str_pub_topic, "%s/data/%s", _script->topic_path,
-            _cell->cell_info.imei);
+    len = sprintf(str_pub_topic, "%s/data/%s", _script->topic_path,
+                  _cell->cell_info.imei);
     memset(mqttpub_topic, 0, 128);
-    strncpy(mqttpub_topic, str_pub_topic, strlen(str_pub_topic));
+    strncpy(mqttpub_topic, str_pub_topic, len);
+    return len;
   }
 
-  void make_mqttStatPayload(char *str_stat) {
+  int make_mqttStatPayload(char *str_stat) {
+    int len = 0;
     static char stat_payload[512];
-    sprintf(stat_payload, stat_pattern, _cell->cell_info.imei,
-            (unsigned int)rtc_read(), firmware_vers, Dev_Group, period_min,
-            str_stat, _cell->cell_info.sig, _cell->cell_info.ber,
-            _cell->cell_info.cops_msg, _cell->cell_info.cereg_msg,
-            _cell->cell_info.cpsi_msg);
+    memset(stat_payload, 0, 512);
+
+    len = sprintf(stat_payload, stat_pattern, _cell->cell_info.imei,
+                  (unsigned int)rtc_read(), firmware_vers, Dev_Group,
+                  period_min, str_stat, _cell->cell_info.sig,
+                  _cell->cell_info.ber, _cell->cell_info.cops_msg,
+                  _cell->cell_info.cereg_msg, _cell->cell_info.cpsi_msg);
     memset(mqtt_stat_payload, 0, 512);
-    strncpy(mqtt_stat_payload, stat_payload, strlen(stat_payload));
+    strncpy(mqtt_stat_payload, stat_payload, len);
+    return len;
   }
 
-  void make_mqttStatTopic() {
+  int make_mqttStatTopic() {
+    int len = 0;
     static char stat_topic[128];
-    sprintf(stat_topic, "%s/status/%s", _script->topic_path,
-            _cell->cell_info.imei);
+    memset(stat_topic, 0, 128);
+
+    len = sprintf(stat_topic, "%s/status/%s", _script->topic_path,
+                  _cell->cell_info.imei);
     memset(mqtt_stat_topic, 0, 128);
-    strncpy(mqtt_stat_topic, stat_topic, strlen(stat_topic));
+    strncpy(mqtt_stat_topic, stat_topic, len);
+    return len;
   }
 
-  void make_mqttCfgTopic() {
-    static char stat_topic[128];
-    sprintf(stat_topic, "%s/config/#", _script->topic_path);
+  int make_mqttCfgTopic() {
+    int len = 0;
+    static char cfg_topic[128];
+    memset(cfg_topic, 0, 128);
+
+    len = sprintf(cfg_topic, "%s/config/#", _script->topic_path);
     memset(mqtt_cfg_topic, 0, 128);
-    strncpy(mqtt_cfg_topic, stat_topic, strlen(stat_topic));
+    strncpy(mqtt_cfg_topic, cfg_topic, len);
+    return len;
   }
 
 private:
@@ -545,6 +563,7 @@ void device_stat_update(CellularService *_obj, mqttPayload *_mqttpayload,
   if (_obj->get_cereg(_obj->cell_info.cereg_msg) > 0) {
 
     _mqttpayload->make_mqttStatPayload(str_stat);
+
     _obj->mqtt_publish(_mqttpayload->mqtt_stat_topic,
                        _mqttpayload->mqtt_stat_payload);
   }
