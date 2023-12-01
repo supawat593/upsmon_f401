@@ -1016,13 +1016,13 @@ bool Sim7600Cellular::http_set_parameter(char url[128], int content,
     temp = ret;
   } else {
     ret = temp &&
-          _atc->send("AT+HTTPPARA=\"CONTENT\",\"%s\"", "mutipart/form-data") &&
+          _atc->send("AT+HTTPPARA=\"CONTENT\",\"%s\"", "multipart/form-data") &&
           _atc->recv("OK");
     temp = ret;
   }
 
-  ret = temp && _atc->send("AT+HTTPPARA=\"READMODE\",%d", readmode) &&
-        _atc->recv("OK");
+//   ret = temp && _atc->send("AT+HTTPPARA=\"READMODE\",%d", readmode) &&
+//         _atc->recv("OK");
 
   debug_if(!ret, "http_set_parameter() : checking pattern fail\r\n");
   _atc->set_timeout(8000);

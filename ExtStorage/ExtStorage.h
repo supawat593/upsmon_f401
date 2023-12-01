@@ -1,6 +1,7 @@
 #ifndef EXTSTORAGE_H
 #define EXTSTORAGE_H
 
+#include "../CellularService/CellularService.h"
 #include "../typedef_src.h"
 #include "Base64.h"
 #include "FATFileSystem.h"
@@ -21,6 +22,8 @@ public:
 
   void write_data_log(char msg[256], char path[128]);
   int check_filesize(char full_path[128], const char *fopen_mode = "r");
+  bool upload_log(CellularService *_modem, char full_path[128],
+                  char topic[128]);
 
 private:
   FILE *file;

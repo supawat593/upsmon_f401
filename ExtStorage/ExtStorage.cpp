@@ -215,3 +215,35 @@ int ExtStorage::check_filesize(char full_path[128], const char *fopen_mode) {
   file_mtx.unlock();
   return len;
 }
+
+bool ExtStorage::upload_log(CellularService *_modem, char full_path[128],
+                            char topic[128]) {
+  char line[256];
+  volatile bool pub_complete = false;
+  volatile bool tflag = true;
+
+  file_mtx.lock();
+  file = fopen(full_path, "r");
+
+  if (file != NULL) {
+    int rec = 0;
+    //   while (fgets(line, 256, textfile)) {
+    while ((fgets(line, 256, file) != NULL) && tflag) {
+      // printf("\r\n%s\r\n", line);
+      int len = strlen(line);
+      line[len - 2] = '\0';
+      // modem->mqtt_publish(mqtt_obj->mqttpub_topic, line);
+      debug("\r\nrecord number: %d --->\r\n", ++rec);
+
+      pub_complete = tflag && _modem->mqtt_publish(topic, line);
+      tflag = pub_complete;
+    }
+
+    fclose(file);
+  } else {
+    printf("fopen log fail!\r\n");
+  }
+
+  file_mtx.unlock();
+  return pub_complete;
+}

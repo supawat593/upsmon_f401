@@ -130,7 +130,8 @@ Queue<int, 1> netstat_queue;
 MemoryPool<blink_t, 1> blink_mpool;
 Queue<blink_t, 1> blink_queue;
 
-Mail<mail_t, 8> mail_box, ret_usb_mail;
+Mail<mail_t, 60> mail_box;
+Mail<mail_t, 8> ret_usb_mail;
 
 Base64 base64_obj;
 init_script_t script_bkp;

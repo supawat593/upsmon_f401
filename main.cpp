@@ -203,6 +203,7 @@ void capture_thread_routine() {
   capture_sem.release();
 
   while (true) {
+
     // printf("*********************************" CRLF);
     // printf("capture---> timestamp: %d" CRLF, (unsigned int)rtc_read());
     // printf("*********************************" CRLF);
@@ -224,7 +225,8 @@ void capture_thread_routine() {
       strcpy(mail->cmd, str_cmd[j]);
       xtc232->flush();
 
-      debug_if(xtc232->send(mail->cmd), "send command: %s\r\n", mail->cmd);
+      debug_if(!xtc232->send(mail->cmd), "command: %s have sent fail\r\n",
+               mail->cmd);
       read_xparser_to_char(ret_rs232, 128, '\r', xtc232);
 
       if (strlen(ret_rs232) > 0) {
@@ -512,9 +514,58 @@ int main() {
                 (mqtt_obj->mqtt_payload[len_mqttpayload - 1] == '}');
 
       if ((len_mqttpayload > 0) && msg_rdy) {
+        int logsize = ext.check_filesize(FULL_LOG_FILE_PATH, "r");
+        // printf("logsize=%d\r\n", logsize);
+
+        if (logsize > 0x40000) {
+          printf("\r\n<----- sizeof logfile over criteria ----->\r\n");
+
+          FILE *textfile, *dummyfile;
+          int offset = logsize - 0x8000;
+
+          char line[256];
+          char dummyfname[128];
+          strcpy(dummyfname, "/");
+          strcat(dummyfname, SPIF_MOUNT_PATH);
+          strcat(dummyfname, "/");
+          strcat(dummyfname, "dummylog.txt");
+
+          textfile = fopen(FULL_LOG_FILE_PATH, "r");
+          dummyfile = fopen(dummyfname, "w");
+
+          if ((textfile != NULL) && (dummyfile != NULL)) {
+
+            fseek(textfile, offset, SEEK_SET);
+            while (fgets(line, 256, textfile) != NULL) {
+              // printf("\r\n%s\r\n", line);
+              //   int len = strlen(line);
+              //   line[len - 2] = '\0';
+              // modem->mqtt_publish(mqtt_obj
+              fputs(line, dummyfile);
+            }
+            fclose(dummyfile);
+
+            fseek(textfile, 0, SEEK_SET);
+            fclose(textfile);
+
+            debug_if(remove(FULL_LOG_FILE_PATH) == 0,
+                     "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
+
+            debug_if(rename(dummyfname, FULL_LOG_FILE_PATH) == 0,
+                     "rename file %s to %s complete\r\n", dummyfname,
+                     FULL_LOG_FILE_PATH);
+          } else {
+            printf("fopen logfile fail\r\n");
+          }
+
+          logsize = ext.check_filesize(FULL_LOG_FILE_PATH, "r");
+          debug_if(logsize > 0, "before log have size= %d bytes.\r\n", logsize);
+        }
+
         ext.write_data_log(mqtt_obj->mqtt_payload, (char *)FULL_LOG_FILE_PATH);
         debug("log path %s : size= %d bytes.\r\n", FULL_LOG_FILE_PATH,
               ext.check_filesize(FULL_LOG_FILE_PATH, "r"));
+        logsize = ext.check_filesize(FULL_LOG_FILE_PATH, "r");
       }
 
       debug_if(!msg_rdy, "mqttpayload compose fail\r\n");
@@ -529,7 +580,7 @@ int main() {
       if (!get_mdm_busy()) {
 
         if (((unsigned int)rtc_read() - get_rtc_pub()) >
-            ((unsigned int)(0.5 * 60 * period_min))) {
+            ((unsigned int)(0.85 * 60 * period_min))) {
 
           int log_len = ext.check_filesize(FULL_LOG_FILE_PATH, "r");
           if (log_len > ((int)((i_cmd - 0.5) * len_mqttpayload))) {
@@ -539,6 +590,11 @@ int main() {
           }
           // mdm_evt_flags.set(FLAG_UPLOAD);
         } else if ((((unsigned int)rtc_read() - last_rtc_check_NW) > 50)) {
+
+          debug("\r\ncapture_thread : stack_size=%d used_stack=%d "
+                "free_stack=%d\r\n",
+                capture_thread.stack_size(), capture_thread.used_stack(),
+                capture_thread.free_stack());
 
           mdm_evt_flags.set(FLAG_CONNECTION);
 
@@ -618,39 +674,47 @@ void cellular_task() {
         set_notify_ready(false);
         set_mdm_busy(true);
 
-        FILE *textfile;
-        char line[256];
+        // FILE *textfile;
+        // char line[256];
 
         debug("log path %s : size= %d bytes.\r\n", FULL_LOG_FILE_PATH,
               ext.check_filesize(FULL_LOG_FILE_PATH, "r"));
 
-        textfile = fopen(FULL_LOG_FILE_PATH, "r");
-        if (textfile != NULL) {
-          volatile bool pub_complete = false;
-          volatile bool tflag = true;
+        // textfile = fopen(FULL_LOG_FILE_PATH, "r");
+        // if (textfile != NULL) {
+        volatile bool pub_complete = false;
+        //   volatile bool tflag = true;
 
-          //   while (fgets(line, 256, textfile)) {
-          while ((fgets(line, 256, textfile) != NULL) && tflag) {
-            // printf("\r\n%s\r\n", line);
-            int len = strlen(line);
-            line[len - 2] = '\0';
-            // modem->mqtt_publish(mqtt_obj->mqttpub_topic, line);
+        //   //   while (fgets(line, 256, textfile)) {
+        //   while ((fgets(line, 256, textfile) != NULL) && tflag) {
+        //     // printf("\r\n%s\r\n", line);
+        //     int len = strlen(line);
+        //     line[len - 2] = '\0';
+        //     // modem->mqtt_publish(mqtt_obj->mqttpub_topic, line);
 
-            pub_complete =
-                tflag && modem->mqtt_publish(mqtt_obj->mqttpub_topic, line);
-            tflag = pub_complete;
-          }
+        //     pub_complete =
+        //         tflag && modem->mqtt_publish(mqtt_obj->mqttpub_topic, line);
+        //     tflag = pub_complete;
+        //   }
 
-          fclose(textfile);
+        //   fclose(textfile);
 
-          if (pub_complete) {
-            debug_if(remove(FULL_LOG_FILE_PATH) == 0,
-                     "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
-          }
-          //   debug_if(remove(FULL_LOG_FILE_PATH) == 0,
-          //            "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
-        } else {
-          debug("fopen log fail\r\n");
+        //   if (pub_complete) {
+        //     debug_if(remove(FULL_LOG_FILE_PATH) == 0,
+        //              "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
+        //   }
+        //   //   debug_if(remove(FULL_LOG_FILE_PATH) == 0,
+        //   //            "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
+        // } else {
+        //   debug("fopen log fail\r\n");
+        // }
+
+        pub_complete =
+            ext.upload_log(modem, FULL_LOG_FILE_PATH, mqtt_obj->mqttpub_topic);
+
+        if (pub_complete) {
+          debug_if(remove(FULL_LOG_FILE_PATH) == 0,
+                   "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
         }
 
         set_mdm_busy(false);
