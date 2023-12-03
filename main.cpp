@@ -6,6 +6,7 @@
 #include "mbed.h"
 #include "upsmon_rtos.h"
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -26,6 +27,8 @@
 #if TARGET_NUCLEO_F401RE
 #define LED2 PA_6
 #endif
+
+#define BLOCKSIZE_4K 4 * 1024
 
 DigitalOut myled(LED1, 1);
 DigitalOut netstat(LED2, 0);
@@ -73,16 +76,13 @@ int last_utc_update_stat = 0;
 unsigned int last_rtc_check_NW = 0;
 unsigned int rtc_uptime = 0;
 
+char xbuffer[BLOCKSIZE_4K];
+
 Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
     capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
     mdm_notify_thread(osPriorityNormal, 0x0c00, nullptr, "mdm_notify_thread"),
     cellular_thread(osPriorityNormal, 0x1000, nullptr, "cellular_thread");
-
-// Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
-//     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
-//     capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
-//     cellular_thread(osPriorityNormal, 0x1000, nullptr, "cellular_thread");
 
 Thread *usb_thread;
 Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
@@ -470,10 +470,6 @@ int main() {
     set_mdm_busy(false);
   }
 
-  //   mdm_notify_thread.start(callback(mdm_notify_routine));
-
-  //   capture_thread.start(callback(capture_thread_routine));
-  //   usb_thread.start(callback(usb_passthrough));
   cellular_thread.start(callback(cellular_task));
   capture_thread.start(callback(capture_thread_routine));
   mdm_notify_thread.start(callback(mdm_notify_routine));
@@ -537,10 +533,7 @@ int main() {
 
             fseek(textfile, offset, SEEK_SET);
             while (fgets(line, 256, textfile) != NULL) {
-              // printf("\r\n%s\r\n", line);
-              //   int len = strlen(line);
-              //   line[len - 2] = '\0';
-              // modem->mqtt_publish(mqtt_obj
+
               fputs(line, dummyfile);
             }
             fclose(dummyfile);
@@ -591,11 +584,6 @@ int main() {
           // mdm_evt_flags.set(FLAG_UPLOAD);
         } else if ((((unsigned int)rtc_read() - last_rtc_check_NW) > 50)) {
 
-          debug("\r\ncapture_thread : stack_size=%d used_stack=%d "
-                "free_stack=%d\r\n",
-                capture_thread.stack_size(), capture_thread.used_stack(),
-                capture_thread.free_stack());
-
           mdm_evt_flags.set(FLAG_CONNECTION);
 
         } // end last_rtc_check_NW > 55
@@ -611,50 +599,82 @@ int main() {
 void cellular_task() {
 
   param_mqtt_t param_mqtt = {0, 0, false, false, {false, false, false, 0}};
+  volatile bool pub_complete = false;
 
-  //   char url_http[128] =
-  //   "http://vms.mydevice.cloud/~tun/upsmon_dummy_1000.bin";
+  char url_http[128] =
+      "http://vms.mydevice.cloud/~tun/split_firmware/upsmon_f401_update.bin";
+
+  //   char url_http[128] = "http://vms.mydevice.cloud/~tun/split_firmware/xaa";
+
   //   char url_http[128] = "http://vms.mydevice.cloud/~tun/test4.txt";
-  char url_http[128] = "http://vms.mydevice.cloud/~tun/test2.txt";
 
   capture_sem.acquire();
+
   unsigned long flags_read = 0;
   printf("Starting cellular_task()        : %p\r\n", ThisThread::get_id());
   mqtt_init(&param_mqtt);
 
-  //   application/octet-stream
+  modem->set_cgdcont(2);
+  modem->set_cgact(2);
+  modem->get_cgact(2);
 
-  //   modem->set_cgdcont(2);
-  //   modem->set_cgact(2);
+  if (modem->http_start()) {
+    modem->http_set_parameter(url_http);
 
-  //   modem->get_cgact(2);
+    int len = 0;
+    char rxbuf[1100];
 
-  //   if (modem->http_start()) {
-  //     modem->http_set_parameter(url_http, 0, 1);
+    if (modem->http_method_action(&len)) {
 
-  //     int len = 0;
-  //     debug_if(modem->http_method_action(&len), "method_action
-  //     datalen=%d\r\n",
-  //              len);
+      debug("method_action : datalen = % d\r\n ", len);
 
-  //     char rxbuf[1100];
-  //     debug_if(modem->http_read_header(rxbuf, &len),
-  //              "read_header datalen = % d\r\n ", len);
+      debug_if(modem->http_read_header(rxbuf, &len),
+               "read_header : len = % d\r\n\n<---------- header_buf "
+               "---------->\r\n%s\r\n\n ",
+               len, rxbuf);
 
-  //     debug_if(modem->http_getsize_data(&len), "getsize_data datalen=%d\r\n",
-  //              len);
+      debug_if(modem->http_getsize_data(&len), "getsize_data datalen=%d\r\n",
+               len);
 
-  //     if (len > 0) {
+      int num = 0;
+      int subsize = BLOCKSIZE_4K;
+      int last_subpart = 0;
 
-  //       modem->http_read_data(rxbuf, 0, len);
-  //     }
+      if (len > 0) {
 
-  //     modem->http_stop();
+        num = len >> 12;
+        last_subpart = len & ((1 << 12) - 1);
 
-  //     //   if (bmqtt_sub) {
-  //     //     set_notify_ready(true);
-  //     //   }
-  //   }
+        if (last_subpart > 0) {
+          num += 1;
+        }
+
+        unsigned int crc = 0;
+        MbedCRC<POLY_32BIT_ANSI, 32> ct;
+        ct.compute_partial_start(&crc);
+
+        for (int x = 0; x < num; x++) {
+
+          if ((last_subpart > 0) && (x == (num - 1))) {
+            subsize = last_subpart;
+          }
+
+          if (modem->http_read_data(xbuffer, (x << 12), subsize)) {
+            ct.compute_partial((void *)xbuffer, subsize, &crc);
+
+            // printHEX((unsigned char *)xbuffer, subsize);
+          }
+          memset(xbuffer, 0xff, 0x1000);
+        }
+
+        ct.compute_partial_stop(&crc);
+
+        printf("calc_crc32 = %u [0x%08X]\r\n\n", crc, crc);
+      }
+    }
+
+    modem->http_stop();
+  }
 
   capture_sem.release();
 
@@ -674,40 +694,8 @@ void cellular_task() {
         set_notify_ready(false);
         set_mdm_busy(true);
 
-        // FILE *textfile;
-        // char line[256];
-
         debug("log path %s : size= %d bytes.\r\n", FULL_LOG_FILE_PATH,
               ext.check_filesize(FULL_LOG_FILE_PATH, "r"));
-
-        // textfile = fopen(FULL_LOG_FILE_PATH, "r");
-        // if (textfile != NULL) {
-        volatile bool pub_complete = false;
-        //   volatile bool tflag = true;
-
-        //   //   while (fgets(line, 256, textfile)) {
-        //   while ((fgets(line, 256, textfile) != NULL) && tflag) {
-        //     // printf("\r\n%s\r\n", line);
-        //     int len = strlen(line);
-        //     line[len - 2] = '\0';
-        //     // modem->mqtt_publish(mqtt_obj->mqttpub_topic, line);
-
-        //     pub_complete =
-        //         tflag && modem->mqtt_publish(mqtt_obj->mqttpub_topic, line);
-        //     tflag = pub_complete;
-        //   }
-
-        //   fclose(textfile);
-
-        //   if (pub_complete) {
-        //     debug_if(remove(FULL_LOG_FILE_PATH) == 0,
-        //              "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
-        //   }
-        //   //   debug_if(remove(FULL_LOG_FILE_PATH) == 0,
-        //   //            "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
-        // } else {
-        //   debug("fopen log fail\r\n");
-        // }
 
         pub_complete =
             ext.upload_log(modem, FULL_LOG_FILE_PATH, mqtt_obj->mqttpub_topic);

@@ -1021,8 +1021,8 @@ bool Sim7600Cellular::http_set_parameter(char url[128], int content,
     temp = ret;
   }
 
-//   ret = temp && _atc->send("AT+HTTPPARA=\"READMODE\",%d", readmode) &&
-//         _atc->recv("OK");
+  //   ret = temp && _atc->send("AT+HTTPPARA=\"READMODE\",%d", readmode) &&
+  //         _atc->recv("OK");
 
   debug_if(!ret, "http_set_parameter() : checking pattern fail\r\n");
   _atc->set_timeout(8000);
@@ -1033,73 +1033,64 @@ bool Sim7600Cellular::http_method_action(int *datalen, int method) {
 
   bool ret = false;
   int status = -1;
-  _atc->set_timeout(30000);
+  //   _atc->set_timeout(30000);
 
   if (_atc->send("AT+HTTPACTION=%d", method) && _atc->recv("OK") &&
-      _atc->recv("+HTTPACTION : %d,%d,%d", &method, &status, datalen)) {
+      _atc->recv("+HTTPACTION : %d,%d,%d\r\n", &method, &status, datalen)) {
     debug("http_method_action -> method=%d status=%d datalen=%d\r\n", method,
           status, *datalen);
     ret = (status == 200) ? true : false;
+    return ret;
   }
-  debug_if(!ret, "http_method_action() : checking pattern fail\r\n");
-  _atc->set_timeout(8000);
+  debug("http_method_action() : checking pattern fail\r\n");
+  //   _atc->set_timeout(8000);
   return ret;
 }
 
 bool Sim7600Cellular::http_read_header(char *rxbuf, int *datalen) {
   bool ret = false;
-  char buf[2][1024];
-  int i = 0;
-  _atc->debug_on(1);
-  _atc->set_timeout(30000);
+  char dummy[32];
+  int len_dummy = 0;
+
+  //   _atc->debug_on(1);
+  memset(buf, 0, 0x200);
+  _atc->set_timeout(1500);
   _atc->send("AT+HTTPHEAD");
 
-  while (serial->readable()) {
-    serial->read(buf[0] + i, 1);
-    i++;
-  }
+  _atc->read(buf, 0x200);
 
-  printHEX((unsigned char *)buf[0], i);
+  //   printHEX((unsigned char *)buf, 0x200);
 
   int st = 0, end = 0;
-  while ((memcmp(&buf[0][st], "+HTTPHEAD: ", 11) != 0) && (st < i)) {
+  while ((memcmp(&buf[st], "+HTTPHEAD: ", 11) != 0) && (st < 0x200)) {
     st++;
   }
 
-  while ((memcmp(&buf[0][end], "OK", 2) != 0) && (end < i)) {
+  *datalen = 0;
+  if (st < 0x200) {
+    sscanf(&buf[st], "+HTTPHEAD: %d\r\n", datalen);
+    sprintf(dummy, "+HTTPHEAD: %d\r\n", *datalen);
+    len_dummy = strlen(dummy);
+    end = st + len_dummy + *datalen;
+  }
+
+  while ((memcmp(&buf[end], "OK\r\n", 4) != 0) && (end < 0x200)) {
     end++;
   }
 
-  if ((st < i) && (end < i)) {
-    for (int j = 0; j < (end - st + 2); j++) {
-      buf[1][j] = buf[0][st + j];
-    }
+  if ((st < 0x200) && (end < 0x200)) {
+    rxbuf[end - st - len_dummy - 2] = '\0';
+    memcpy(rxbuf, &buf[st + len_dummy], end - st - len_dummy - 2);
 
-    printHEX((unsigned char *)buf[1], end - st + 2);
-    debug("buf[1] = %s\r\n", buf[1]);
-
-    int len_header = -1;
-
-    if (sscanf(buf[1], "+HTTPHEAD: %d\r\n", &len_header) == 1) {
-      char dummy[32];
-      int len_dummy = -1;
-      sprintf(dummy, "+HTTPHEAD: %d\r\n", len_header);
-      len_dummy = strlen(dummy);
-      memset(buf[0], 0, 1024);
-
-      for (int j = 0; j < len_header; j++) {
-        buf[0][j] = buf[1][j + len_dummy];
-      }
-
-      printf("header = %s\r\n", buf[0]);
-    }
+    // printHEX((unsigned char *)rxbuf, end - st - len_dummy - 2);
 
     ret = true;
   }
 
   debug_if(!ret, "http_read_header() : checking pattern fail\r\n");
   _atc->set_timeout(8000);
-  _atc->debug_on(0);
+  _atc->flush();
+  //   _atc->debug_on(0);
   return ret;
 }
 
@@ -1107,138 +1098,184 @@ bool Sim7600Cellular::http_getsize_data(int *datalen) {
   bool ret = false;
   //   _atc->debug_on(1);
   _atc->set_timeout(30000);
-  if (_atc->send("AT+HTTPREAD?") && _atc->recv("+HTTPREAD: LEN,%d", datalen) &&
-      _atc->recv("OK")) {
+  if (_atc->send("AT+HTTPREAD?") &&
+      _atc->recv("+HTTPREAD: LEN,%d\r\n", datalen) && _atc->recv("OK")) {
 
     ret = true;
   }
 
   debug_if(!ret, "http_getsize_data() : checking pattern fail\r\n");
   _atc->set_timeout(8000);
+  _atc->flush();
   //   _atc->debug_on(0);
   return ret;
 }
 
 // bool Sim7600Cellular::http_read_data(char *rxbuf, int offset, int datalen) {
 //   bool ret = false;
-//   char buf[2][4200];
-//   int i = 0;
-//   //   _atc->debug_on(1);
-//   _atc->set_timeout(30000);
-//   //   if (_atc->send("AT+HTTPREAD=%d,%d", offset, datalen)) {
+//   int xlen = datalen + 0x80;
+//   memset(buf, 0xff, 0x2080);
+
+//   _atc->set_timeout(1500);
 //   if (_atc->send("AT+HTTPREAD=%d,%d", offset, datalen) && _atc->recv("OK")) {
 
-//     while (serial->readable()) {
-//       serial->read(buf[0] + i, 1);
-//       i++;
-//     }
+//     _atc->read(buf, xlen);
 
-//     debug("http_read_data\r\n");
-//     printHEX((unsigned char *)buf[0], i);
-
-//     int st = 0, end = 0;
-//     while ((memcmp(&buf[0][st], "+HTTPREAD: ", 11) != 0) && (st < i)) {
-//       st++;
-//     }
-
-//     while ((memcmp(&buf[0][end], "+HTTPREAD: 0", 12) != 0) && (end < i)) {
+//     int end = 0;
+//     while ((memcmp(&buf[end], "+HTTPREAD: 0\r\n", 14) != 0) && (end < xlen))
+//     {
 //       end++;
 //     }
 
-//     if ((st < i) && (end < i)) {
-//       for (int j = 0; j < (end - st); j++) {
-//         buf[1][j] = buf[0][st + j];
-//       }
+//     int npart = 0;
+//     int partsize = 0x400;
+//     int last_size = 0;
 
-//       printHEX((unsigned char *)buf[1], end - st);
-//       debug("buf[1] = %s\r\n", buf[1]);
+//     npart = datalen >> 10;
+//     last_size = datalen & ((1 << 10) - 1);
 
-//       int len_data = -1;
+//     if (last_size > 0) {
+//       npart += 1;
+//     }
 
-//       if (sscanf(buf[1], "+HTTPREAD: %d\r\n", &len_data) == 1) {
-//         char dummy[32];
-//         int len_dummy = -1;
-//         sprintf(dummy, "+HTTPREAD: %d\r\n", len_data);
-//         len_dummy = strlen(dummy);
-//         memset(buf[0], 0, end - st);
+//     if (end < xlen) {
 
-//         for (int j = 0; j < len_data; j++) {
-//           buf[0][j] = buf[1][j + len_dummy];
+//       int k = 0;
+//       int index = 0;
+//       int detect_size = 0;
+//       int offset_data = 0;
+
+//       while (k < end) {
+
+//         if (memcmp(&buf[k], "+HTTPREAD: ", 11) == 0) {
+
+//           sscanf(&buf[k], "+HTTPREAD: %d\r\n", &detect_size);
+
+//           if (detect_size != 0) {
+
+//             if ((last_size > 0) && (index == (npart - 1))) {
+//               partsize = last_size;
+//             }
+
+//             if (detect_size >= 1000) {
+//               offset_data = 17;
+//             } else if (detect_size >= 100) {
+//               offset_data = 16;
+//             } else if (detect_size >= 10) {
+//               offset_data = 15;
+//             } else {
+//               offset_data = 14;
+//             }
+
+//             detect_size = 0;
+//             memcpy(&rxbuf[index << 10], &buf[k + offset_data], partsize);
+
+//             index++;
+//           }
 //         }
-//         printHEX((unsigned char *)buf[0], len_data);
-//         printf("data = %s\r\n", buf[0]);
+
+//         k++;
 //       }
 
 //       ret = true;
 //     }
 //   }
+
+//   debug_if(ret, "http_read_data : offset= 0x%06X size=%d bytes. --->
+//   Done\r\n",
+//            offset, datalen);
 //   debug_if(!ret, "http_read_data() : checking pattern fail\r\n");
 //   _atc->set_timeout(8000);
-//   //   _atc->debug_on(0);
+//   _atc->flush();
+
 //   return ret;
 // }
 
 bool Sim7600Cellular::http_read_data(char *rxbuf, int offset, int datalen) {
   bool ret = false;
-  char buf[2][4200];
-  int xlen = datalen + 100;
-  int i = 0;
+  int xlen = datalen + 0x80;
+  memset(buf, 0xff, 0x2080);
 
-  //   _atc->debug_on(1);
-  _atc->set_timeout(30000);
-  //   if (_atc->send("AT+HTTPREAD=%d,%d", offset, datalen)) {
+  _atc->set_timeout(1500);
   if (_atc->send("AT+HTTPREAD=%d,%d", offset, datalen) && _atc->recv("OK")) {
 
-    _atc->set_timeout(2000);
-    // while (serial->readable()) {
-    //   serial->read(buf[0] + i, 1);
-    //   i++;
-    // }
-
-    _atc->read(buf[0], xlen);
-
-    debug("http_read_data\r\n");
-    // printHEX((unsigned char *)buf[0], xlen);
+    _atc->read(buf, xlen);
 
     int st = 0, end = 0;
-    while ((memcmp(&buf[0][st], "+HTTPREAD: ", 11) != 0) && (st < xlen)) {
+
+    while ((memcmp(&buf[st], "+HTTPREAD: ", 11) != 0) && (st < xlen)) {
       st++;
     }
 
-    while ((memcmp(&buf[0][end], "+HTTPREAD: 0", 12) != 0) && (end < xlen)) {
+    if (st < xlen) {
+      end = st + datalen;
+    }
+
+    while ((memcmp(&buf[end], "\r\n+HTTPREAD: 0\r\n", 16) != 0) &&
+           (end < xlen)) {
       end++;
     }
 
-    if ((st < xlen) && (end < xlen)) {
-      for (int j = 0; j < (end - st); j++) {
-        buf[1][j] = buf[0][st + j];
-      }
+    int npart = 0;
+    int partsize = 0x400;
+    int last_size = 0;
 
-      printHEX((unsigned char *)buf[1], end - st);
-      //   debug("buf[1] = %s\r\n", buf[1]);
+    npart = datalen >> 10;
+    last_size = datalen & ((1 << 10) - 1);
 
-      int len_data = -1;
+    if (last_size > 0) {
+      npart += 1;
+    }
 
-      if (sscanf(buf[1], "+HTTPREAD: %d\r\n", &len_data) == 1) {
-        char dummy[32];
-        int len_dummy = -1;
-        sprintf(dummy, "+HTTPREAD: %d\r\n", len_data);
-        len_dummy = strlen(dummy);
-        memset(buf[0], 0xff, end - st);
+    if (end < xlen) {
 
-        for (int j = 0; j < len_data; j++) {
-          buf[0][j] = buf[1][j + len_dummy];
+      int k = 0;
+      int index = 0;
+      int detect_size = 0;
+      int offset_data = 0;
+
+      while (k < (end - st)) {
+
+        if (memcmp(&buf[st + k], "+HTTPREAD: ", 11) == 0) {
+
+          sscanf(&buf[st + k], "+HTTPREAD: %d\r\n", &detect_size);
+
+          if (detect_size != 0) {
+
+            if ((last_size > 0) && (index == (npart - 1))) {
+              partsize = last_size;
+            }
+
+            if (detect_size >= 1000) {
+              offset_data = 17;
+            } else if (detect_size >= 100) {
+              offset_data = 16;
+            } else if (detect_size >= 10) {
+              offset_data = 15;
+            } else {
+              offset_data = 14;
+            }
+
+            detect_size = 0;
+            memcpy(&rxbuf[index << 10], &buf[st + k + offset_data], partsize);
+
+            index++;
+          }
         }
-        printHEX((unsigned char *)buf[0], len_data);
-        // printf("data = %s\r\n", buf[0]);
+
+        k++;
       }
 
       ret = true;
     }
   }
+
+  debug_if(ret, "http_read_data : offset= 0x%06X size=%d bytes. ---> Done\r\n",
+           offset, datalen);
   debug_if(!ret, "http_read_data() : checking pattern fail\r\n");
   _atc->set_timeout(8000);
-  //   _atc->debug_on(0);
+  _atc->flush();
+
   return ret;
 }
 

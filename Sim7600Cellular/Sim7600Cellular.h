@@ -84,6 +84,7 @@ public:
 private:
   ATCmdParser *_atc;
   BufferedSerial *serial;
+  char buf[0x2080];
 
   void printHEX(unsigned char *msg, unsigned int len);
 };
