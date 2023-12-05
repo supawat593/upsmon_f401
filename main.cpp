@@ -12,11 +12,6 @@
 #include <ctime>
 
 #include "./TimerTPL5010/TimerTPL5010.h"
-// #include "USBSerial.h"
-
-#include "./ExtStorage/ExtStorage.h"
-#include "FATFileSystem.h"
-#include "SPIFBlockDevice.h"
 
 #define FLAG_PPS (1UL << 0)
 #define FLAG_UPLOAD (1UL << 1)
@@ -33,17 +28,6 @@
 DigitalOut myled(LED1, 1);
 DigitalOut netstat(LED2, 0);
 
-FATFileSystem fs(SPIF_MOUNT_PATH);
-SPIFBlockDevice bd(MBED_CONF_SPIF_DRIVER_SPI_MOSI,
-                   MBED_CONF_SPIF_DRIVER_SPI_MISO,
-                   MBED_CONF_SPIF_DRIVER_SPI_CLK, MBED_CONF_SPIF_DRIVER_SPI_CS);
-ExtStorage ext(&bd, &fs);
-
-// static UnbufferedSerial pc(USBTX, USBRX);
-static BufferedSerial mdm(MDM_TXD_PIN, MDM_RXD_PIN, 115200);
-ATCmdParser *_parser;
-// Sim7600Cellular *modem;
-CellularService *modem;
 TimerTPL5010 tpl5010(WDT_WAKE_PIN, WDT_DONE_PIN);
 
 BufferedSerial rs232(ECARD_TX_PIN, ECARD_RX_PIN, 2400);
@@ -101,9 +85,7 @@ int len_mqttpayload = 0;
 bool msg_rdy = false;
 
 void cellular_task();
-// void mqtt_init();
 void mqtt_init(param_mqtt_t *param);
-// void maintain_connection();
 void maintain_connection(param_mqtt_t *param);
 
 void reset_mqtt_flag(param_mqtt_t *param) {
@@ -274,147 +256,6 @@ void capture_thread_routine() {
   }
 }
 
-uint32_t hex2int(char *hex) {
-  uint32_t val = 0;
-  while (*hex) {
-    // get current character then increment
-    uint8_t byte = *hex++;
-    // transform hex character to the 4bit equivalent number, using the ascii
-    // table indexes
-    if (byte >= '0' && byte <= '9')
-      byte = byte - '0';
-    else if (byte >= 'a' && byte <= 'f')
-      byte = byte - 'a' + 10;
-    else if (byte >= 'A' && byte <= 'F')
-      byte = byte - 'A' + 10;
-    // shift 4 to make space for new digit, and add the 4 bits of the new digit
-    val = (val << 4) | (byte & 0xF);
-  }
-  return val;
-}
-
-void mdm_notify_routine() {
-  printf("mdm_notify_routine() started --->\r\n");
-  char mdm_xbuf[512];
-  int st = 0, end = 0;
-
-  memcpy(&script_bkp, &init_script, sizeof(init_script_t));
-  volatile bool is_rx_mqtt = false;
-  oob_notify_t oob_msg;
-
-  while (true) {
-
-    if (get_notify_ready() && (!get_mdm_busy())) {
-
-      if (mdm.readable()) {
-
-        set_mdm_busy(true);
-        memset(oob_msg.rxtopic_msg, 0, 512);
-        read_xparser_to_char(mdm_xbuf, 512, '\r', _parser);
-
-        if (detection_notify("+CMQTTRXSTART:", mdm_xbuf, oob_msg.rxtopic_msg)) {
-
-          printf("\r\nNotify msg: %s\r\n", oob_msg.rxtopic_msg);
-
-          int len_buf = 512;
-          if (sscanf(oob_msg.rxtopic_msg, "+CMQTTRXSTART: %*d,%d,%d",
-                     &oob_msg.mqttsub.len_topic,
-                     &oob_msg.mqttsub.len_payload) == 2) {
-
-            len_buf = (oob_msg.mqttsub.len_topic + oob_msg.mqttsub.len_payload)
-                      << 1;
-          }
-          //   debug_if(len_buf < 512, "len_buf=%d\r\n", len_buf);
-
-          memset(mdm_xbuf, 0, len_buf);
-          memset(oob_msg.rxtopic_msg, 0, len_buf);
-
-          _parser->set_timeout(500);
-          _parser->read(mdm_xbuf, len_buf);
-          _parser->set_timeout(8000);
-          st = 0;
-          while ((strncmp(&mdm_xbuf[st], "+CMQTTRXTOPIC", 13) != 0) &&
-                 (st < (len_buf - 13))) {
-            st++;
-          }
-
-          if (st < (len_buf - 13)) {
-
-            memcpy(&oob_msg.rxtopic_msg[0], &mdm_xbuf[st],
-                   sizeof(mdm_xbuf) - st);
-            oob_msg.mqttsub = {"\0", "\0", 0, 0, 0};
-
-            if (sscanf(oob_msg.rxtopic_msg, mqtt_sub_topic_pattern,
-                       &oob_msg.mqttsub.len_topic, oob_msg.mqttsub.sub_topic,
-                       &oob_msg.mqttsub.len_payload,
-                       oob_msg.mqttsub.sub_payload,
-                       &oob_msg.mqttsub.client_idx) == 5) {
-
-              printout_mqttsub_notify(&oob_msg.mqttsub);
-              is_rx_mqtt = true;
-            }
-          }
-
-        }
-
-        else if (detection_notify("+CEREG:", mdm_xbuf, oob_msg.rxtopic_msg)) {
-          printf("\r\nNotify msg: %s\r\n", oob_msg.rxtopic_msg);
-
-          char data1[5], data2[10];
-          int int1, int2;
-          uint32_t u32_x1, u32_x2;
-          if (sscanf(oob_msg.rxtopic_msg, "+CEREG: %d,%[^,],%[^,],%d", &int1,
-                     data1, data2, &int2) == 4) {
-            u32_x1 = hex2int(data1);
-            u32_x2 = hex2int(data2);
-            // debug("int1= %d\tint2= %d\r\nu32_x1= %04X\tu32_x2= %08X\r\n",
-            // int1,
-            //       int2, u32_x1, u32_x2);
-          }
-        } else if (detection_notify("+CREG:", mdm_xbuf, oob_msg.rxtopic_msg)) {
-          printf("\r\nNotify msg: %s\r\n", oob_msg.rxtopic_msg);
-        } else if (detection_notify("+CMQTTCONNLOST:", mdm_xbuf,
-                                    oob_msg.rxtopic_msg)) {
-          printf("\r\nNotify msg: %s\r\n", oob_msg.rxtopic_msg);
-          bmqtt_cnt = false;
-          bmqtt_sub = false;
-
-          int int_cause;
-          if (sscanf(oob_msg.rxtopic_msg, "+CMQTTCONNLOST: %*d,%d",
-                     &int_cause) == 1) {
-            debug_if(int_cause == 3, "cause=3 -> Network is closed.\r\e");
-            // bmqtt_cnt = false;
-            // bmqtt_sub = false;
-          }
-        } else if (detection_notify("+CMQTTNONET", mdm_xbuf,
-                                    oob_msg.rxtopic_msg)) {
-          printf("\r\nNotify msg: %s\r\n", oob_msg.rxtopic_msg);
-          bmqtt_start = false;
-          bmqtt_cnt = false;
-          bmqtt_sub = false;
-        } else {
-        }
-
-        if (is_rx_mqtt) {
-          //   debug("is_rx_mqtt: true\r\n");
-
-          if (script_config_process(oob_msg.mqttsub.sub_payload, modem) > 0) {
-
-            debug("before write script file\r\n");
-            ext.write_init_script(&script_bkp, FULL_SCRIPT_FILE_PATH);
-            ext.deinit();
-            debug("configuration file have configured : Restart NOW! ...\r\n");
-            system_reset();
-          }
-          is_rx_mqtt = false;
-        }
-
-        set_mdm_busy(false);
-      }
-    }
-  }
-}
-
 int main() {
 
   // Initialise the digital pin LED1 as an output
@@ -472,7 +313,7 @@ int main() {
 
   cellular_thread.start(callback(cellular_task));
   capture_thread.start(callback(capture_thread_routine));
-  mdm_notify_thread.start(callback(mdm_notify_routine));
+  mdm_notify_thread.start(callback(modem_notify_routine, &init_script));
 
   while (true) {
 
@@ -601,12 +442,15 @@ void cellular_task() {
   param_mqtt_t param_mqtt = {0, 0, false, false, {false, false, false, 0}};
   volatile bool pub_complete = false;
 
-  char url_http[128] =
-      "http://vms.mydevice.cloud/~tun/split_firmware/upsmon_f401_update.bin";
-
-  //   char url_http[128] = "http://vms.mydevice.cloud/~tun/split_firmware/xaa";
-
-  //   char url_http[128] = "http://vms.mydevice.cloud/~tun/test4.txt";
+  char http_binary_path[128] = "~tun/split_firmware/upsmon_f401_update.bin";
+  int url_short_len = strlen(init_script.url_shortpath);
+  if (init_script.url_shortpath[url_short_len - 1] == '/') {
+    init_script.url_shortpath[url_short_len - 1] = '\0';
+  }
+  memset(init_script.url_fullpath, 0, 128);
+  strcpy(init_script.url_fullpath, init_script.url_shortpath);
+  strcat(init_script.url_fullpath, "/");
+  strcat(init_script.url_fullpath, http_binary_path);
 
   capture_sem.acquire();
 
@@ -619,7 +463,8 @@ void cellular_task() {
   modem->get_cgact(2);
 
   if (modem->http_start()) {
-    modem->http_set_parameter(url_http);
+    // modem->http_set_parameter(url_http);
+    modem->http_set_parameter(init_script.url_fullpath);
 
     int len = 0;
     char rxbuf[1100];

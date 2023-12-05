@@ -1,6 +1,18 @@
 
 #include "./ExtStorage.h"
 
+const char xinit_cfg_write[] = {
+    "#Configuration file for UPS Monitor\r\n\r\nSTART:\r\nBroker: "
+    "\"%s\"\r\nPort: %d\r\nKey: \"%s\"\r\nURL: \"%s\"\r\nTopic: "
+    "\"%s\"\r\nCommand: "
+    "[%s]\r\nModel: \"%s\"\r\nSite_ID: \"%s\"\r\nSTOP:"};
+
+const char xinit_cfg_pattern[] = {"%*[^\n]\nBroker: \"%[^\"]\"\nPort: %d\nKey: "
+                                  "\"%[^\"]\"\nURL: "
+                                  "\"%[^\"]\"\nTopic: \"%[^\"]\"\nCommand: "
+                                  "[%[^]]]\nModel: \"%[^\"]\"\nSite_ID: "
+                                  "\"%[^\"]\"\n%*s"};
+
 ExtStorage::ExtStorage(BlockDevice *_bd, FATFileSystem *_fs) {
   bd = _bd;
   fs = _fs;
@@ -29,10 +41,6 @@ bool ExtStorage::deinit() {
 
 void ExtStorage::write_init_script(init_script_t *_script, char path[128],
                                    const char *fopen_mode) {
-  char xinit_cfg_write[] = {
-      "#Configuration file for UPS Monitor\r\n\r\nSTART:\r\nBroker: "
-      "\"%s\"\r\nPort: %d\r\nKey: \"%s\"\r\nTopic: \"%s\"\r\nCommand: "
-      "[%s]\r\nModel: \"%s\"\r\nSite_ID: \"%s\"\r\nSTOP:"};
 
   file_mtx.lock();
   file = fopen(path, fopen_mode);
@@ -43,8 +51,8 @@ void ExtStorage::write_init_script(init_script_t *_script, char path[128],
     // debug("initial script found\r\n");
     char fbuffer[512];
     sprintf(fbuffer, xinit_cfg_write, _script->broker, _script->port,
-            _script->encoded_key, _script->topic_path, _script->full_cmd,
-            _script->model, _script->siteID);
+            _script->encoded_key, _script->url_shortpath, _script->topic_path,
+            _script->full_cmd, _script->model, _script->siteID);
 
     // sprintf(fbuffer, "Hello : %d\r\n",15);
 
@@ -82,10 +90,6 @@ void ExtStorage::read_init_script(init_script_t *_script, char path[128],
 
 void ExtStorage::apply_script(FILE *file, char path[128],
                               init_script_t *_script) {
-  char xinit_cfg_pattern[] = {"%*[^\n]\nBroker: \"%[^\"]\"\nPort: %d\nKey: "
-                              "\"%[^\"]\"\nTopic: \"%[^\"]\"\nCommand: "
-                              "[%[^]]]\nModel: \"%[^\"]\"\nSite_ID: "
-                              "\"%[^\"]\"\n%*s"};
 
   fseek(file, 0, SEEK_END);
   long len = ftell(file);
@@ -121,8 +125,8 @@ void ExtStorage::apply_script(FILE *file, char path[128],
   char key_encoded[64];
 
   if (sscanf(script_buff, xinit_cfg_pattern, _script->broker, &_script->port,
-             key_encoded, _script->topic_path, _script->full_cmd,
-             _script->model, _script->siteID) == 7) {
+             key_encoded, _script->url_shortpath, _script->topic_path,
+             _script->full_cmd, _script->model, _script->siteID) == 8) {
     if (_script->topic_path[strlen(_script->topic_path) - 1] == '/') {
       _script->topic_path[strlen(_script->topic_path) - 1] = '\0';
     }
@@ -131,6 +135,7 @@ void ExtStorage::apply_script(FILE *file, char path[128],
     printf("    broker: %s\r\n", _script->broker);
     printf("    port: %d\r\n", _script->port);
     printf("    Key: %s\r\n", key_encoded);
+    printf("    URL: %s\r\n", _script->url_shortpath);
     // printf("    usr: %s" CRLF, init_script.usr);
     // printf("    pwd: %s" CRLF, init_script.pwd);
     printf("    topic_path: %s\r\n", _script->topic_path);

@@ -9,6 +9,19 @@ typedef struct {
   char resp[128];
 } mail_t;
 
+// typedef struct {
+//   char broker[32];
+//   int port;
+//   char usr[32];
+//   char pwd[32];
+//   char encoded_key[64];
+//   char topic_path[100];
+//   char full_cmd[64];
+//   char model[32];
+//   char siteID[32];
+//   char Device[16];
+// } init_script_t;
+
 typedef struct {
   char broker[32];
   int port;
@@ -20,6 +33,8 @@ typedef struct {
   char model[32];
   char siteID[32];
   char Device[16];
+  char url_shortpath[64];
+  char url_fullpath[128];
 } init_script_t;
 
 typedef struct {
