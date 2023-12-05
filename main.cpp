@@ -79,6 +79,7 @@ Semaphore capture_sem(1);
 
 init_script_t init_script, iap_init_script;
 mqttPayload *mqtt_obj = NULL;
+oob_notify_t oob_msg;
 
 int i_cmd = 0;
 int len_mqttpayload = 0;
@@ -313,7 +314,9 @@ int main() {
 
   cellular_thread.start(callback(cellular_task));
   capture_thread.start(callback(capture_thread_routine));
-  mdm_notify_thread.start(callback(modem_notify_routine, &init_script));
+
+  backup_script(&init_script);
+  mdm_notify_thread.start(callback(modem_notify_routine, &oob_msg));
 
   while (true) {
 
@@ -411,6 +414,11 @@ int main() {
 
     else {
 
+      if (get_cfgevt_flag()) {
+        set_cfgevt_flag(false);
+        mdm_evt_flags.set(FLAG_CFGCHECK);
+      }
+
       if (!get_mdm_busy()) {
 
         if (((unsigned int)rtc_read() - get_rtc_pub()) >
@@ -441,6 +449,7 @@ void cellular_task() {
 
   param_mqtt_t param_mqtt = {0, 0, false, false, {false, false, false, 0}};
   volatile bool pub_complete = false;
+  int cfg_return_count = 0;
 
   char http_binary_path[128] = "~tun/split_firmware/upsmon_f401_update.bin";
   int url_short_len = strlen(init_script.url_shortpath);
@@ -559,7 +568,27 @@ void cellular_task() {
 
     case FLAG_CFGCHECK:
       mdm_sem.acquire();
-      //   schedule_cfg_check();
+
+      debug("is_cfgevt_flag: true\r\n");
+      //   modem->get_oob_msg(&oob_msg);
+      debug("payload= %s\r\n", oob_msg.mqttsub.sub_payload);
+
+      cfg_return_count =
+          script_config_process(oob_msg.mqttsub.sub_payload, modem);
+
+      debug_if(cfg_return_count > 0, "cfg_return_count=%d\r\n",
+               cfg_return_count);
+      if (cfg_return_count > 0) {
+
+        debug("before write script file\r\n");
+        restore_script(&init_script);
+        ext.write_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
+        ext.deinit();
+
+        debug("configuration file have configured : Restart NOW!...\r\n");
+        system_reset();
+      }
+
       mdm_evt_flags.clear(flags_read);
 
       mdm_sem.release();

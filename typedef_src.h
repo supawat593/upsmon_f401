@@ -9,19 +9,6 @@ typedef struct {
   char resp[128];
 } mail_t;
 
-// typedef struct {
-//   char broker[32];
-//   int port;
-//   char usr[32];
-//   char pwd[32];
-//   char encoded_key[64];
-//   char topic_path[100];
-//   char full_cmd[64];
-//   char model[32];
-//   char siteID[32];
-//   char Device[16];
-// } init_script_t;
-
 typedef struct {
   char broker[32];
   int port;
@@ -50,15 +37,6 @@ typedef struct {
   char cpsi_msg[128];
   char cclk_msg[32];
 } __attribute__((__packed__)) cellular_data_t;
-
-// typedef struct {
-//   char stat_payload[512];
-//   char stat_topic[128];
-//   char str_data_topic[128];
-//   char str_data_msg[256];
-//   char str_sub_topic[128];
-
-// } mqtt_config_t;
 
 typedef struct {
   char sub_topic[128];

@@ -149,14 +149,17 @@ Mail<mail_t, 8> ret_usb_mail;
 
 Base64 base64_obj;
 init_script_t script_bkp;
+Mutex mtx_init_script;
 
 volatile bool is_usb_cnnt = false;
 volatile bool is_idle_rs232 = true;
 volatile bool is_mdm_busy = true;
 volatile bool is_notify_ready = false;
+volatile bool is_cfgevt_flag = false;
 
 unsigned int last_rtc_pub = 0;
 Mutex mtx_rtc_msg;
+Mutex mtx_cfgevt;
 
 unsigned int *uid = (unsigned int *)0x801bffc;
 unique_stat_t mydata;
@@ -179,6 +182,32 @@ void set_rtc_pub(unsigned int nrtc) {
   mtx_rtc_msg.lock();
   last_rtc_pub = nrtc;
   mtx_rtc_msg.unlock();
+}
+
+bool get_cfgevt_flag() {
+  bool temp;
+  mtx_cfgevt.lock();
+  temp = is_cfgevt_flag;
+  mtx_cfgevt.unlock();
+  return temp;
+}
+
+void set_cfgevt_flag(bool temp) {
+  mtx_cfgevt.lock();
+  is_cfgevt_flag = temp;
+  mtx_cfgevt.unlock();
+}
+
+void restore_script(init_script_t *_script) {
+  mtx_init_script.lock();
+  memcpy(_script, &script_bkp, sizeof(init_script_t));
+  mtx_init_script.unlock();
+}
+
+void backup_script(init_script_t *_script) {
+  mtx_init_script.lock();
+  memcpy(&script_bkp, _script, sizeof(init_script_t));
+  mtx_init_script.unlock();
 }
 
 void printout_mqttsub_notify(mqttsub_notify_t *data) {
@@ -603,15 +632,10 @@ uint32_t hex2int(char *hex) {
   return val;
 }
 
-void modem_notify_routine(init_script_t *_script) {
+void modem_notify_routine(oob_notify_t *oob_msg) {
   printf("mdm_notify_routine() started --->\r\n");
   char mdm_xbuf[512];
   int st = 0, end = 0;
-
-  //   memcpy(&script_bkp, &init_script, sizeof(init_script_t));
-  memcpy(&script_bkp, _script, sizeof(init_script_t));
-  volatile bool is_rx_mqtt = false;
-  oob_notify_t oob_msg;
 
   while (true) {
 
@@ -620,26 +644,28 @@ void modem_notify_routine(init_script_t *_script) {
       if (mdm.readable()) {
 
         set_mdm_busy(true);
-        memset(oob_msg.rxtopic_msg, 0, 512);
+        memset(oob_msg->rxtopic_msg, 0, 512);
         // read_xparser_to_char(mdm_xbuf, 512, '\r', _parser);
         modem->read_atc_to_char(mdm_xbuf, 512, '\r');
 
-        if (detection_notify("+CMQTTRXSTART:", mdm_xbuf, oob_msg.rxtopic_msg)) {
+        if (detection_notify("+CMQTTRXSTART:", mdm_xbuf,
+                             oob_msg->rxtopic_msg)) {
 
-          printf("\r\nNotify msg: %s\r\n", oob_msg.rxtopic_msg);
+          printf("\r\nNotify msg: %s\r\n", oob_msg->rxtopic_msg);
 
           int len_buf = 512;
-          if (sscanf(oob_msg.rxtopic_msg, "+CMQTTRXSTART: %*d,%d,%d",
-                     &oob_msg.mqttsub.len_topic,
-                     &oob_msg.mqttsub.len_payload) == 2) {
+          if (sscanf(oob_msg->rxtopic_msg, "+CMQTTRXSTART: %*d,%d,%d",
+                     &oob_msg->mqttsub.len_topic,
+                     &oob_msg->mqttsub.len_payload) == 2) {
 
-            len_buf = (oob_msg.mqttsub.len_topic + oob_msg.mqttsub.len_payload)
-                      << 1;
+            len_buf =
+                (oob_msg->mqttsub.len_topic + oob_msg->mqttsub.len_payload)
+                << 1;
           }
           //   debug_if(len_buf < 512, "len_buf=%d\r\n", len_buf);
 
           memset(mdm_xbuf, 0, len_buf);
-          memset(oob_msg.rxtopic_msg, 0, len_buf);
+          memset(oob_msg->rxtopic_msg, 0, len_buf);
 
           //   _parser->set_timeout(500);
           //   _parser->read(mdm_xbuf, len_buf);
@@ -659,30 +685,31 @@ void modem_notify_routine(init_script_t *_script) {
 
           if (st < (len_buf - 13)) {
 
-            memcpy(&oob_msg.rxtopic_msg[0], &mdm_xbuf[st],
+            memcpy(&oob_msg->rxtopic_msg[0], &mdm_xbuf[st],
                    sizeof(mdm_xbuf) - st);
-            oob_msg.mqttsub = {"\0", "\0", 0, 0, 0};
+            oob_msg->mqttsub = {"\0", "\0", 0, 0, 0};
 
-            if (sscanf(oob_msg.rxtopic_msg, mqtt_sub_topic_pattern,
-                       &oob_msg.mqttsub.len_topic, oob_msg.mqttsub.sub_topic,
-                       &oob_msg.mqttsub.len_payload,
-                       oob_msg.mqttsub.sub_payload,
-                       &oob_msg.mqttsub.client_idx) == 5) {
+            if (sscanf(oob_msg->rxtopic_msg, mqtt_sub_topic_pattern,
+                       &oob_msg->mqttsub.len_topic, oob_msg->mqttsub.sub_topic,
+                       &oob_msg->mqttsub.len_payload,
+                       oob_msg->mqttsub.sub_payload,
+                       &oob_msg->mqttsub.client_idx) == 5) {
 
-              printout_mqttsub_notify(&oob_msg.mqttsub);
-              is_rx_mqtt = true;
+              printout_mqttsub_notify(&oob_msg->mqttsub);
+              //   is_rx_mqtt = true;
+              set_cfgevt_flag(true);
             }
           }
 
         }
 
-        else if (detection_notify("+CEREG:", mdm_xbuf, oob_msg.rxtopic_msg)) {
-          printf("\r\nNotify msg: %s\r\n", oob_msg.rxtopic_msg);
+        else if (detection_notify("+CEREG:", mdm_xbuf, oob_msg->rxtopic_msg)) {
+          printf("\r\nNotify msg: %s\r\n", oob_msg->rxtopic_msg);
 
           char data1[5], data2[10];
           int int1, int2;
           uint32_t u32_x1, u32_x2;
-          if (sscanf(oob_msg.rxtopic_msg, "+CEREG: %d,%[^,],%[^,],%d", &int1,
+          if (sscanf(oob_msg->rxtopic_msg, "+CEREG: %d,%[^,],%[^,],%d", &int1,
                      data1, data2, &int2) == 4) {
             u32_x1 = hex2int(data1);
             u32_x2 = hex2int(data2);
@@ -690,42 +717,28 @@ void modem_notify_routine(init_script_t *_script) {
             // int1,
             //       int2, u32_x1, u32_x2);
           }
-        } else if (detection_notify("+CREG:", mdm_xbuf, oob_msg.rxtopic_msg)) {
-          printf("\r\nNotify msg: %s\r\n", oob_msg.rxtopic_msg);
+        } else if (detection_notify("+CREG:", mdm_xbuf, oob_msg->rxtopic_msg)) {
+          printf("\r\nNotify msg: %s\r\n", oob_msg->rxtopic_msg);
         } else if (detection_notify("+CMQTTCONNLOST:", mdm_xbuf,
-                                    oob_msg.rxtopic_msg)) {
-          printf("\r\nNotify msg: %s\r\n", oob_msg.rxtopic_msg);
+                                    oob_msg->rxtopic_msg)) {
+          printf("\r\nNotify msg: %s\r\n", oob_msg->rxtopic_msg);
           //   bmqtt_cnt = false;
           //   bmqtt_sub = false;
 
           int int_cause;
-          if (sscanf(oob_msg.rxtopic_msg, "+CMQTTCONNLOST: %*d,%d",
+          if (sscanf(oob_msg->rxtopic_msg, "+CMQTTCONNLOST: %*d,%d",
                      &int_cause) == 1) {
             debug_if(int_cause == 3, "cause=3 -> Network is closed.\r\e");
             // bmqtt_cnt = false;
             // bmqtt_sub = false;
           }
         } else if (detection_notify("+CMQTTNONET", mdm_xbuf,
-                                    oob_msg.rxtopic_msg)) {
-          printf("\r\nNotify msg: %s\r\n", oob_msg.rxtopic_msg);
+                                    oob_msg->rxtopic_msg)) {
+          printf("\r\nNotify msg: %s\r\n", oob_msg->rxtopic_msg);
           //   bmqtt_start = false;
           //   bmqtt_cnt = false;
           //   bmqtt_sub = false;
         } else {
-        }
-
-        if (is_rx_mqtt) {
-          //   debug("is_rx_mqtt: true\r\n");
-
-          if (script_config_process(oob_msg.mqttsub.sub_payload, modem) > 0) {
-
-            debug("before write script file\r\n");
-            ext.write_init_script(&script_bkp, FULL_SCRIPT_FILE_PATH);
-            ext.deinit();
-            debug("configuration file have configured : Restart NOW! ...\r\n");
-            system_reset();
-          }
-          is_rx_mqtt = false;
         }
 
         set_mdm_busy(false);
