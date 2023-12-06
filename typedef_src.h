@@ -10,6 +10,15 @@ typedef struct {
 } mail_t;
 
 typedef struct {
+  char version[8];
+  char device[16];
+  char dir_path[128];
+  char filename[128];
+  int file_length;
+  unsigned int checksum;
+} ota_data_t;
+
+typedef struct {
   char broker[32];
   int port;
   char usr[32];
@@ -20,8 +29,8 @@ typedef struct {
   char model[32];
   char siteID[32];
   char Device[16];
-  char url_shortpath[64];
-  char url_fullpath[128];
+  char url_path[64];
+  ota_data_t ota_data;
 } init_script_t;
 
 typedef struct {

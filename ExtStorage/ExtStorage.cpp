@@ -1,5 +1,7 @@
 
 #include "./ExtStorage.h"
+#include <cstdio>
+#include <cstring>
 
 const char xinit_cfg_write[] = {
     "#Configuration file for UPS Monitor\r\n\r\nSTART:\r\nBroker: "
@@ -51,7 +53,7 @@ void ExtStorage::write_init_script(init_script_t *_script, char path[128],
     // debug("initial script found\r\n");
     char fbuffer[512];
     sprintf(fbuffer, xinit_cfg_write, _script->broker, _script->port,
-            _script->encoded_key, _script->url_shortpath, _script->topic_path,
+            _script->encoded_key, _script->url_path, _script->topic_path,
             _script->full_cmd, _script->model, _script->siteID);
 
     // sprintf(fbuffer, "Hello : %d\r\n",15);
@@ -125,7 +127,7 @@ void ExtStorage::apply_script(FILE *file, char path[128],
   char key_encoded[64];
 
   if (sscanf(script_buff, xinit_cfg_pattern, _script->broker, &_script->port,
-             key_encoded, _script->url_shortpath, _script->topic_path,
+             key_encoded, _script->url_path, _script->topic_path,
              _script->full_cmd, _script->model, _script->siteID) == 8) {
     if (_script->topic_path[strlen(_script->topic_path) - 1] == '/') {
       _script->topic_path[strlen(_script->topic_path) - 1] = '\0';
@@ -135,7 +137,7 @@ void ExtStorage::apply_script(FILE *file, char path[128],
     printf("    broker: %s\r\n", _script->broker);
     printf("    port: %d\r\n", _script->port);
     printf("    Key: %s\r\n", key_encoded);
-    printf("    URL: %s\r\n", _script->url_shortpath);
+    printf("    URL: %s\r\n", _script->url_path);
     // printf("    usr: %s" CRLF, init_script.usr);
     // printf("    pwd: %s" CRLF, init_script.pwd);
     printf("    topic_path: %s\r\n", _script->topic_path);
@@ -251,4 +253,152 @@ bool ExtStorage::upload_log(CellularService *_modem, char full_path[128],
 
   file_mtx.unlock();
   return pub_complete;
+}
+
+bool ExtStorage::process_ota(CellularService *_modem, init_script_t *_script) {
+
+  int len = 0;
+  char rxbuf[1100];
+  char file_url[128];
+  char str[128];
+  bool ota_complete = false;
+
+  xbuffer = (char *)malloc(BLOCKSIZE_4K * sizeof(char));
+  if (xbuffer == NULL) {
+    debug("allocating xbuffer[BLOCKSIZE_4K] incomplete!!!\r\n");
+    return false;
+  }
+
+  if (!_modem->http_start()) {
+    debug("http_start() incomplete!!!\r\n");
+    return false;
+  }
+
+  const char s[2] = "/";
+  char cut_msg[8][32];
+  char dummy_filename[32];
+  char *token;
+  int i = 0;
+
+  strcpy(str, _script->ota_data.filename);
+  /* get the first token */
+  token = strtok(str, s);
+
+  /* walk through other tokens */
+  while (token != NULL) {
+    printf(" %s\r\n", token);
+
+    //      memset(cut_msg[i], 0, 16);
+    strcpy(cut_msg[i], token);
+    i++;
+    token = strtok(NULL, s);
+  }
+
+  if (i > 1) {
+    if (sscanf(cut_msg[i - 1], "%[^.].bin", dummy_filename) == 1) {
+      strcpy(_script->ota_data.dir_path, "/");
+      strcat(_script->ota_data.dir_path, cut_msg[0]);
+
+      if (i > 2) {
+        for (int k = 1; k < (i - 1); k++) {
+          strcat(_script->ota_data.dir_path, "/");
+          strcat(_script->ota_data.dir_path, cut_msg[k]);
+        }
+      }
+
+      memset(_script->ota_data.filename, 0, 128);
+      strcpy(_script->ota_data.filename, cut_msg[i - 1]);
+
+      //   debug("dir_path: %s\r\nfilename: %s\r\n", _script->ota_data.dir_path,
+      //         _script->ota_data.filename);
+    }
+  }
+
+  debug("url_path : %s\r\ndir_path: %s\r\nfilename: %s\r\n", _script->url_path,
+        _script->ota_data.dir_path, _script->ota_data.filename);
+
+  memset(file_url, 0, 128);
+  strcpy(file_url, _script->url_path);
+  strcat(file_url, _script->ota_data.dir_path);
+  strcat(file_url, "/");
+  strcat(file_url, _script->ota_data.filename);
+
+  // modem->http_set_parameter(url_http);
+  _modem->http_set_parameter(file_url);
+
+  if (_modem->http_method_action(&len)) {
+
+    debug("method_action : datalen = % d\r\n ", len);
+
+    debug_if(_modem->http_read_header(rxbuf, &len),
+             "read_header : len = % d\r\n\n<---------- header_buf "
+             "---------->\r\n%s\r\n\n ",
+             len, rxbuf);
+
+    debug_if(_modem->http_getsize_data(&len), "getsize_data datalen=%d\r\n",
+             len);
+
+    debug("datalen=%d script_datalen=%d\r\n", len,
+          _script->ota_data.file_length);
+    if (_script->ota_data.file_length == len) {
+      int num = 0;
+      int subsize = BLOCKSIZE_4K;
+      int last_subpart = 0;
+
+      if (len > 0) {
+
+        num = len >> 12;
+        last_subpart = len & ((1 << 12) - 1);
+
+        if (last_subpart > 0) {
+          num += 1;
+        }
+
+        file_mtx.lock();
+        file = fopen("/spif/firmware.bin", "wb");
+        if (file != NULL) {
+          //
+          unsigned int crc = 0;
+          MbedCRC<POLY_32BIT_ANSI, 32> ct;
+          ct.compute_partial_start(&crc);
+
+          for (int x = 0; x < num; x++) {
+
+            if ((last_subpart > 0) && (x == (num - 1))) {
+              subsize = last_subpart;
+            }
+
+            if (_modem->http_read_data(xbuffer, (x << 12), subsize)) {
+              ct.compute_partial((void *)xbuffer, subsize, &crc);
+              fwrite((const char *)xbuffer, 1, subsize, file);
+              // printHEX((unsigned char *)xbuffer, subsize);
+            }
+            memset(xbuffer, 0xff, 0x1000);
+          }
+
+          ct.compute_partial_stop(&crc);
+          printf("calc_crc32 = %u [0x%08X]\r\n\n", crc, crc);
+          //
+
+          fclose(file);
+
+          if (crc == _script->ota_data.checksum) {
+            debug("CRC32_ANSI : matched\r\n");
+            ota_complete = true;
+          } else {
+            debug_if(remove("/spif/firmware.bin") == 0,
+                     "crc32 not matched remove firmware.bin\r\n");
+          }
+
+        } else {
+          debug("firmware file : fopen fail\r\n");
+        }
+        file_mtx.unlock();
+      }
+    }
+  }
+
+  _modem->http_stop();
+
+  return ota_complete;
 }

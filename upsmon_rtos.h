@@ -156,10 +156,12 @@ volatile bool is_idle_rs232 = true;
 volatile bool is_mdm_busy = true;
 volatile bool is_notify_ready = false;
 volatile bool is_cfgevt_flag = false;
+volatile bool is_firmware_upgrade = false;
 
 unsigned int last_rtc_pub = 0;
 Mutex mtx_rtc_msg;
 Mutex mtx_cfgevt;
+Mutex mtx_firware;
 
 unsigned int *uid = (unsigned int *)0x801bffc;
 unique_stat_t mydata;
@@ -196,6 +198,20 @@ void set_cfgevt_flag(bool temp) {
   mtx_cfgevt.lock();
   is_cfgevt_flag = temp;
   mtx_cfgevt.unlock();
+}
+
+bool get_grant_firmware() {
+  bool temp;
+  mtx_firware.lock();
+  temp = is_firmware_upgrade;
+  mtx_firware.unlock();
+  return temp;
+}
+
+void set_grant_firmware(bool temp) {
+  mtx_firware.lock();
+  is_firmware_upgrade = temp;
+  mtx_firware.unlock();
 }
 
 void restore_script(init_script_t *_script) {
@@ -477,8 +493,8 @@ int detection_notify(const char *keyword, char *src, char *dst) {
   }
 }
 
-int script_config_process(char cfg_msg[512], CellularService *_modem) {
-  char str_cmd[10][64];
+int script_config_process(char cfg_msg[1024], CellularService *_modem) {
+  char str_cmd[12][96];
   char raw_key[64];
   char delim[] = "&";
   char *ptr;
@@ -496,6 +512,7 @@ int script_config_process(char cfg_msg[512], CellularService *_modem) {
   char raw_usr[16], raw_pwd[16];
   int cfg_success = 0;
   bool match_device = false;
+  bool grant_firmware = false;
 
   for (int i = 0; i < n_cmd; i++) {
 
@@ -510,10 +527,19 @@ int script_config_process(char cfg_msg[512], CellularService *_modem) {
       } else {
         match_device = false;
       }
+    } else if (sscanf(str_cmd[i], "Firmware_Upgrade: [\"%[^\"]\",%d,%d]",
+                      script_bkp.ota_data.filename,
+                      &script_bkp.ota_data.file_length,
+                      &script_bkp.ota_data.checksum) == 3) {
+
+      grant_firmware = true;
+
     } else if (sscanf(str_cmd[i], "Command: [%[^]]]", script_bkp.full_cmd) ==
                1) {
       cfg_success++;
     } else if (sscanf(str_cmd[i], "Broker: \"%[^\"]\"", script_bkp.broker)) {
+      cfg_success++;
+    } else if (sscanf(str_cmd[i], "URL: \"%[^\"]\"", script_bkp.url_path)) {
       cfg_success++;
     } else if (sscanf(str_cmd[i], "Topic: \"%[^\"]\"", script_bkp.topic_path) ==
                1) {
@@ -588,7 +614,15 @@ int script_config_process(char cfg_msg[512], CellularService *_modem) {
   debug_if(!match_device, "Not Matched or Authentication fail...\r\n");
 
   //   return cfg_success;
-  return ((cfg_success > 0) && match_device) ? cfg_success : 0;
+  //   return ((cfg_success > 0) && match_device) ? cfg_success : 0;
+
+  if (grant_firmware) {
+    return ((cfg_success > 0) && match_device) ? cfg_success + 8 : 8;
+  } else {
+    return ((cfg_success > 0) && match_device) ? cfg_success : 0;
+  }
+
+  return 0;
 }
 
 void device_stat_update(CellularService *_obj, mqttPayload *_mqttpayload,

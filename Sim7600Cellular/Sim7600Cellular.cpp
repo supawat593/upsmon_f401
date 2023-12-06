@@ -35,8 +35,7 @@ void Sim7600Cellular::printHEX(unsigned char *msg, unsigned int len) {
          "\r\n");
 }
 bool Sim7600Cellular::check_at_ready() {
-  //   _atc->debug_on(1);
-  //   _atc->set_timeout(12000);
+
   int ret = 0;
   debug("wait for *ATREADY\r\n");
 
@@ -44,9 +43,6 @@ bool Sim7600Cellular::check_at_ready() {
     debug("*ATREADY Receiving fail!!!\r\n");
   }
 
-  //   _atc->debug_on(0);
-  //   _atc->set_timeout(8000);
-  //   _atc->flush();
   return (ret == 1) ? true : false;
 }
 
@@ -67,16 +63,8 @@ void Sim7600Cellular::get_ati(char *ati_retmsg) {
     end++;
   }
 
-  //   char substr[end - st];
-  //   memset(substr, 0, end - st);
-  //   memcpy(&substr, &buffer[st], end - st);
   memcpy(ati_retmsg, &buffer[st], end - st);
 
-  //   debug("\r\n------ ATI Return mesg. "
-  //         "------\r\n%s\r\n------------------------------\r\n\r\n",
-  //         substr);
-
-  //   _atc->debug_on(0);
   _atc->set_timeout(8000);
   _atc->flush();
 }
@@ -153,22 +141,8 @@ bool Sim7600Cellular::check_ntp_status() {
   return (err == 0) ? true : false;
 }
 
-// bool Sim7600Cellular::check_attachNW() {
-//   int ret = 0;
-//   if (_atc->send("AT+CGATT?") && _atc->recv("+CGATT: %d\r\n", &ret)) {
-//     if (ret == 1) {
-//       return true;
-//     } else {
-//       return false;
-//     }
-//   }
-//   return false;
-// }
-
 bool Sim7600Cellular::check_attachNW() {
   int ret = -1;
-  //   _atc->set_timeout(9000);
-  //   _atc->debug_on(1);
 
   if (_atc->send("AT+CGATT?") && _atc->recv("+CGATT: %d\r\n", &ret)) {
     printf("check_attachNW received pattern: +CGATT: %d\r\n", ret);
@@ -176,9 +150,6 @@ bool Sim7600Cellular::check_attachNW() {
     ret = -1;
   }
 
-  //   _atc->set_timeout(8000);
-  //   _atc->flush();
-  //   _atc->debug_on(0);
   return (ret == 1) ? true : false;
 }
 
@@ -293,10 +264,6 @@ int Sim7600Cellular::get_cgdcont(int cid) {
 
 int Sim7600Cellular::set_cgdcont(int cid, char *apn, char *pdp_type) {
 
-  //   char cmd[128];
-  //   sprintf(cmd, "AT+CGDCONT=%d,\"%s\",\"%s\"", cid, pdp_type, apn);
-
-  //   if (_atc->send(cmd) && _atc->recv("OK")) {
   if (_atc->send("AT+CGDCONT=%d,\"%s\",\"%s\"", cid, pdp_type, apn) &&
       _atc->recv("OK")) {
     debug("set cgdcont : cid=%d pdp_type=%s apn=%s\r\n", cid, pdp_type, apn);
@@ -620,8 +587,6 @@ int Sim7600Cellular::ping_dstNW(char *dst, int nrty, int p_size,
   if (_atc->send(cping) && _atc->recv("OK")) {
 
     _atc->read(pbuf, len);
-    // printHEX((unsigned char *)pbuf, len);
-    // printf("pbuf = %s\r\n", pbuf);
   }
 
   _atc->set_timeout(8000);
@@ -1021,9 +986,6 @@ bool Sim7600Cellular::http_set_parameter(char url[128], int content,
     temp = ret;
   }
 
-  //   ret = temp && _atc->send("AT+HTTPPARA=\"READMODE\",%d", readmode) &&
-  //         _atc->recv("OK");
-
   debug_if(!ret, "http_set_parameter() : checking pattern fail\r\n");
   _atc->set_timeout(8000);
   return ret;
@@ -1110,86 +1072,6 @@ bool Sim7600Cellular::http_getsize_data(int *datalen) {
   //   _atc->debug_on(0);
   return ret;
 }
-
-// bool Sim7600Cellular::http_read_data(char *rxbuf, int offset, int datalen) {
-//   bool ret = false;
-//   int xlen = datalen + 0x80;
-//   memset(buf, 0xff, 0x2080);
-
-//   _atc->set_timeout(1500);
-//   if (_atc->send("AT+HTTPREAD=%d,%d", offset, datalen) && _atc->recv("OK")) {
-
-//     _atc->read(buf, xlen);
-
-//     int end = 0;
-//     while ((memcmp(&buf[end], "+HTTPREAD: 0\r\n", 14) != 0) && (end < xlen))
-//     {
-//       end++;
-//     }
-
-//     int npart = 0;
-//     int partsize = 0x400;
-//     int last_size = 0;
-
-//     npart = datalen >> 10;
-//     last_size = datalen & ((1 << 10) - 1);
-
-//     if (last_size > 0) {
-//       npart += 1;
-//     }
-
-//     if (end < xlen) {
-
-//       int k = 0;
-//       int index = 0;
-//       int detect_size = 0;
-//       int offset_data = 0;
-
-//       while (k < end) {
-
-//         if (memcmp(&buf[k], "+HTTPREAD: ", 11) == 0) {
-
-//           sscanf(&buf[k], "+HTTPREAD: %d\r\n", &detect_size);
-
-//           if (detect_size != 0) {
-
-//             if ((last_size > 0) && (index == (npart - 1))) {
-//               partsize = last_size;
-//             }
-
-//             if (detect_size >= 1000) {
-//               offset_data = 17;
-//             } else if (detect_size >= 100) {
-//               offset_data = 16;
-//             } else if (detect_size >= 10) {
-//               offset_data = 15;
-//             } else {
-//               offset_data = 14;
-//             }
-
-//             detect_size = 0;
-//             memcpy(&rxbuf[index << 10], &buf[k + offset_data], partsize);
-
-//             index++;
-//           }
-//         }
-
-//         k++;
-//       }
-
-//       ret = true;
-//     }
-//   }
-
-//   debug_if(ret, "http_read_data : offset= 0x%06X size=%d bytes. --->
-//   Done\r\n",
-//            offset, datalen);
-//   debug_if(!ret, "http_read_data() : checking pattern fail\r\n");
-//   _atc->set_timeout(8000);
-//   _atc->flush();
-
-//   return ret;
-// }
 
 bool Sim7600Cellular::http_read_data(char *rxbuf, int offset, int datalen) {
   bool ret = false;

@@ -1,6 +1,8 @@
 #ifndef EXTSTORAGE_H
 #define EXTSTORAGE_H
 
+#define BLOCKSIZE_4K 4 * 1024
+
 #include "../CellularService/CellularService.h"
 #include "../typedef_src.h"
 #include "Base64.h"
@@ -24,6 +26,7 @@ public:
   int check_filesize(char full_path[128], const char *fopen_mode = "r");
   bool upload_log(CellularService *_modem, char full_path[128],
                   char topic[128]);
+  bool process_ota(CellularService *_modem, init_script_t *_script);
 
 private:
   FILE *file;
@@ -33,6 +36,7 @@ private:
   BlockDevice *bd;
   FATFileSystem *fs;
 
+  char *xbuffer;
   volatile bool is_script_read;
 };
 

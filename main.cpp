@@ -23,7 +23,7 @@
 #define LED2 PA_6
 #endif
 
-#define BLOCKSIZE_4K 4 * 1024
+// #define BLOCKSIZE_4K 4 * 1024
 
 DigitalOut myled(LED1, 1);
 DigitalOut netstat(LED2, 0);
@@ -60,7 +60,7 @@ int last_utc_update_stat = 0;
 unsigned int last_rtc_check_NW = 0;
 unsigned int rtc_uptime = 0;
 
-char xbuffer[BLOCKSIZE_4K];
+// char xbuffer[BLOCKSIZE_4K];
 
 Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
@@ -414,6 +414,11 @@ int main() {
 
     else {
 
+      if (get_grant_firmware()) {
+        set_grant_firmware(false);
+        mdm_evt_flags.set(FLAG_FWCHECK);
+      }
+
       if (get_cfgevt_flag()) {
         set_cfgevt_flag(false);
         mdm_evt_flags.set(FLAG_CFGCHECK);
@@ -422,7 +427,7 @@ int main() {
       if (!get_mdm_busy()) {
 
         if (((unsigned int)rtc_read() - get_rtc_pub()) >
-            ((unsigned int)(0.85 * 60 * period_min))) {
+            ((unsigned int)(0.65 * 60 * period_min))) {
 
           int log_len = ext.check_filesize(FULL_LOG_FILE_PATH, "r");
           if (log_len > ((int)((i_cmd - 0.5) * len_mqttpayload))) {
@@ -451,84 +456,11 @@ void cellular_task() {
   volatile bool pub_complete = false;
   int cfg_return_count = 0;
 
-  char http_binary_path[128] = "~tun/split_firmware/upsmon_f401_update.bin";
-  int url_short_len = strlen(init_script.url_shortpath);
-  if (init_script.url_shortpath[url_short_len - 1] == '/') {
-    init_script.url_shortpath[url_short_len - 1] = '\0';
-  }
-  memset(init_script.url_fullpath, 0, 128);
-  strcpy(init_script.url_fullpath, init_script.url_shortpath);
-  strcat(init_script.url_fullpath, "/");
-  strcat(init_script.url_fullpath, http_binary_path);
-
   capture_sem.acquire();
 
   unsigned long flags_read = 0;
   printf("Starting cellular_task()        : %p\r\n", ThisThread::get_id());
   mqtt_init(&param_mqtt);
-
-  modem->set_cgdcont(2);
-  modem->set_cgact(2);
-  modem->get_cgact(2);
-
-  if (modem->http_start()) {
-    // modem->http_set_parameter(url_http);
-    modem->http_set_parameter(init_script.url_fullpath);
-
-    int len = 0;
-    char rxbuf[1100];
-
-    if (modem->http_method_action(&len)) {
-
-      debug("method_action : datalen = % d\r\n ", len);
-
-      debug_if(modem->http_read_header(rxbuf, &len),
-               "read_header : len = % d\r\n\n<---------- header_buf "
-               "---------->\r\n%s\r\n\n ",
-               len, rxbuf);
-
-      debug_if(modem->http_getsize_data(&len), "getsize_data datalen=%d\r\n",
-               len);
-
-      int num = 0;
-      int subsize = BLOCKSIZE_4K;
-      int last_subpart = 0;
-
-      if (len > 0) {
-
-        num = len >> 12;
-        last_subpart = len & ((1 << 12) - 1);
-
-        if (last_subpart > 0) {
-          num += 1;
-        }
-
-        unsigned int crc = 0;
-        MbedCRC<POLY_32BIT_ANSI, 32> ct;
-        ct.compute_partial_start(&crc);
-
-        for (int x = 0; x < num; x++) {
-
-          if ((last_subpart > 0) && (x == (num - 1))) {
-            subsize = last_subpart;
-          }
-
-          if (modem->http_read_data(xbuffer, (x << 12), subsize)) {
-            ct.compute_partial((void *)xbuffer, subsize, &crc);
-
-            // printHEX((unsigned char *)xbuffer, subsize);
-          }
-          memset(xbuffer, 0xff, 0x1000);
-        }
-
-        ct.compute_partial_stop(&crc);
-
-        printf("calc_crc32 = %u [0x%08X]\r\n\n", crc, crc);
-      }
-    }
-
-    modem->http_stop();
-  }
 
   capture_sem.release();
 
@@ -578,8 +510,11 @@ void cellular_task() {
 
       debug_if(cfg_return_count > 0, "cfg_return_count=%d\r\n",
                cfg_return_count);
-      if (cfg_return_count > 0) {
 
+      if (cfg_return_count >= 8) {
+        restore_script(&init_script);
+        set_grant_firmware(true);
+      } else if (cfg_return_count > 0) {
         debug("before write script file\r\n");
         restore_script(&init_script);
         ext.write_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
@@ -587,6 +522,8 @@ void cellular_task() {
 
         debug("configuration file have configured : Restart NOW!...\r\n");
         system_reset();
+      } else {
+        debug("configuration fail\r\n");
       }
 
       mdm_evt_flags.clear(flags_read);
@@ -606,11 +543,42 @@ void cellular_task() {
     case FLAG_FWCHECK:
       mdm_sem.acquire();
 
-      //   if (upgrade_firmware()) {
-      //     go_bootloader();
-      //   }
+      set_notify_ready(false);
+      set_mdm_busy(true);
 
-      //   nav.first_fix = false;
+      modem->set_cgdcont(2);
+      modem->set_cgact(2);
+      modem->get_cgact(2);
+
+      if (ext.process_ota(modem, &init_script)) {
+        debug("prepare for firmware flashing\r\n");
+
+        if (rename("/spif/firmware.bin", FULL_FIRMWARE_FILE_PATH) == 0) {
+
+          debug("firmware verified : preparing to flashing\r\n");
+        } else {
+
+          debug_if(
+              remove("/spif/firmware.bin") == 0,
+              "firmware not verified : remove file firmware.bin complete\r\n");
+        }
+      }
+
+      if (cfg_return_count > 0) {
+        // debug("before write script file\r\n");
+        ext.write_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
+        ext.deinit();
+
+        debug("configuration file have configured : require system reboot\r\n");
+        debug_if(cfg_return_count >= 8,
+                 "firmware preparing complete : Restart NOW!...\r\n");
+
+        system_reset();
+      }
+
+      set_notify_ready(true);
+      set_mdm_busy(false);
+
       mdm_evt_flags.clear(flags_read);
 
       mdm_sem.release();

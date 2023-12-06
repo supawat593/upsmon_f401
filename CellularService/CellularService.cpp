@@ -40,8 +40,6 @@ void CellularService::MDM_HW_reset(void) {
   mdm_rst = 1; // Active LOW
   ThisThread::sleep_for(3000ms);
   mdm_rst = 0;
-  // wait_ms(200);
-  //   return true;
 }
 
 bool CellularService::initial_NW() {
@@ -66,12 +64,6 @@ bool CellularService::initial_NW() {
 
   this->set_tz_update(0);
 
-  //   if (mdmOK && this->set_full_FUNCTION()) {
-
-  //     this->set_creg(2);
-  //     this->set_cereg(2);
-  //   }
-
   if (mdmOK) {
     this->set_cops();
     this->set_full_FUNCTION();
@@ -89,14 +81,9 @@ bool CellularService::initial_NW() {
     ThisThread::sleep_for(3000ms);
     mdmAtt = this->check_attachNW();
     nty++;
-    // mdmAtt = this->set_attachNW(1);
-    // ThisThread::sleep_for(3000ms);
   }
 
   debug_if(!mdmAtt, "NW Attaching Fail ...\r\n");
-  //   debug_if(this->get_csq(&cell_info.sig, &cell_info.ber), "sig=%d
-  //   ber=%d\r\n",
-  //            cell_info.sig, cell_info.ber);
   this->get_csq(&cell_info.sig, &cell_info.ber);
 
   while (this->get_creg() != 1)

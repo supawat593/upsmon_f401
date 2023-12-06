@@ -76,8 +76,8 @@
 
 #endif
 
-#define firmware_vers "661115"
-#define Dev_Group "LTE"
+#define firmware_vers "661201"
+#define Dev_Group "LTE_A7672E"
 
 #define INITIAL_APP_FILE "initial_script.txt"
 #define SPIF_MOUNT_PATH "spif"
@@ -85,6 +85,9 @@
 
 #define LOG_FILENAME "mylog.txt"
 #define FULL_LOG_FILE_PATH "/" SPIF_MOUNT_PATH "/" LOG_FILENAME
+
+#define FW_FILENAME "upsmon_f401_update.bin"
+#define FULL_FIRMWARE_FILE_PATH "/" SPIF_MOUNT_PATH "/" FW_FILENAME
 
 char mqtt_broker_ip[] = "188.166.189.39";
 // char mqtt_broker[] = "trueiot.io";
