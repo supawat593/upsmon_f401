@@ -451,6 +451,7 @@ void cellular_task() {
 
   param_mqtt_t param_mqtt = {0, 0, false, false, {false, false, false, 0}};
   volatile bool pub_complete = false;
+  volatile bool verified_firmware = false;
   int cfg_return_count = 0;
 
   capture_sem.acquire();
@@ -552,6 +553,7 @@ void cellular_task() {
       modem->get_cgact(2);
 
       if (ext.process_ota(modem, &init_script)) {
+        verified_firmware = true;
         debug("prepare for firmware flashing\r\n");
 
         if (rename("/spif/firmware.bin", FULL_FIRMWARE_FILE_PATH) == 0) {
@@ -565,7 +567,15 @@ void cellular_task() {
         }
       }
 
-      if (cfg_return_count > 0) {
+      if (cfg_return_count == 8) {
+
+        if (verified_firmware) {
+          //   ext.write_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
+          ext.deinit();
+          debug("firmware preparing complete : Restart NOW!...\r\n");
+          system_reset();
+        }
+      } else if (cfg_return_count > 0) {
         // debug("before write script file\r\n");
         ext.write_init_script(&init_script, FULL_SCRIPT_FILE_PATH);
         ext.deinit();
@@ -575,6 +585,8 @@ void cellular_task() {
                  "firmware preparing complete : Restart NOW!...\r\n");
 
         system_reset();
+      } else {
+        // dummy
       }
 
       set_notify_ready(true);

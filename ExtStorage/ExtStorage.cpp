@@ -362,18 +362,25 @@ bool ExtStorage::process_ota(CellularService *_modem, init_script_t *_script) {
           MbedCRC<POLY_32BIT_ANSI, 32> ct;
           ct.compute_partial_start(&crc);
 
-          for (int x = 0; x < num; x++) {
+          int x = 0;
+          bool part_complete = true;
+
+          while ((x < num) && part_complete) {
 
             if ((last_subpart > 0) && (x == (num - 1))) {
               subsize = last_subpart;
             }
 
-            if (_modem->http_read_data(xbuffer, (x << 12), subsize)) {
+            part_complete = _modem->http_read_data(xbuffer, (x << 12), subsize);
+
+            if (part_complete) {
               ct.compute_partial((void *)xbuffer, subsize, &crc);
               fwrite((const char *)xbuffer, 1, subsize, file);
               // printHEX((unsigned char *)xbuffer, subsize);
             }
             memset(xbuffer, 0xff, 0x1000);
+
+            x++;
           }
 
           ct.compute_partial_stop(&crc);
