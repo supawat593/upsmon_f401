@@ -17,8 +17,8 @@
 #define BLINKING_RATE 500ms
 #define CRLF "\r\n"
 
-typedef enum { OFF = 0, IDLE, CONNECTED } netstat_mode;
-typedef enum { PWRON = 0, NORMAL, NOFILE } blink_mode;
+typedef enum { POWEROFF = 0, SEARCH, REGISTERED, TRANSMITTING } netstat_mode;
+typedef enum { LEDOFF = 0, POWERON, NORMAL, NOFILE } blink_mode;
 
 int period_min = 0;
 
@@ -138,8 +138,8 @@ CellularService *modem;
 
 Mutex mutex_idle_rs232, mutex_usb_cnnt, mutex_mdm_busy, mutex_notify;
 
-MemoryPool<int, 1> netstat_mpool;
-Queue<int, 1> netstat_queue;
+MemoryPool<blink_t, 1> netstat_mpool;
+Queue<blink_t, 1> netstat_queue;
 
 MemoryPool<blink_t, 1> blink_mpool;
 Queue<blink_t, 1> blink_queue;
@@ -294,15 +294,19 @@ void set_usb_cnnt(bool temp) {
   mutex_usb_cnnt.unlock();
 }
 
-void blip_netstat(DigitalOut *led) {
-  int led_state = 0;
+void blink_netstat_routine(DigitalOut *led) {
+  int led_state = 1;
+  int period_ms = 1000;
+  float duty = 0.5;
 
   while (true) {
-    int *net_queue;
-
-    if (netstat_queue.try_get_for(Kernel::Clock::duration(200), &net_queue)) {
-      led_state = *net_queue;
-      netstat_mpool.free(net_queue);
+    blink_t *led_queue;
+    if (netstat_queue.try_get_for(
+            Kernel::Clock::duration(int(period_ms * duty)), &led_queue)) {
+      led_state = led_queue->led_state;
+      period_ms = led_queue->period_ms;
+      duty = led_queue->duty;
+      netstat_mpool.free(led_queue);
     }
 
     if (led_state == 1) {
@@ -315,28 +319,40 @@ void blip_netstat(DigitalOut *led) {
   }
 }
 
-void netstat_led(netstat_mode inp = IDLE) {
+void netstat_led_stat(netstat_mode inp = SEARCH) {
 
-  int *net_queue = netstat_mpool.try_alloc();
+  blink_t *net_queue = netstat_mpool.try_alloc();
 
   switch (inp) {
 
-  case IDLE:
-    *net_queue = 1;
+  case SEARCH:
+    net_queue->led_state = 1;
+    net_queue->period_ms = 1000;
+    net_queue->duty = 0.5;
     netstat_queue.try_put(net_queue);
     break;
-  case CONNECTED:
-    *net_queue = 2;
+  case REGISTERED:
+    net_queue->led_state = 2;
+    net_queue->period_ms = 1600;
+    net_queue->duty = 0.5;
+    netstat_queue.try_put(net_queue);
+    break;
+  case TRANSMITTING:
+    net_queue->led_state = 2;
+    net_queue->period_ms = 400;
+    net_queue->duty = 0.5;
     netstat_queue.try_put(net_queue);
     break;
   default:
-    *net_queue = 0;
+    net_queue->led_state = 0;
+    net_queue->period_ms = 1000;
+    net_queue->duty = 0.5;
     netstat_queue.try_put(net_queue);
   }
 }
 
-void blink_routine(DigitalOut *led) {
-  int led_state = 0;
+void blink_ack_routine(DigitalOut *led) {
+  int led_state = 1;
   int period_ms = 1000;
   float duty = 0.5;
   while (true) {
@@ -349,30 +365,38 @@ void blink_routine(DigitalOut *led) {
       blink_mpool.free(led_queue);
     }
 
-    if (led_state == 0) {
+    if (led_state == 1) {
       *led = 1;
-    } else {
+    } else if (led_state == 2) {
       *led = !*led;
+    } else {
+      *led = 0;
     }
   }
 }
 
-void blink_led(blink_mode inp = PWRON) {
+void ack_led_stat(blink_mode inp = POWERON) {
 
   blink_t *led_queue = blink_mpool.try_alloc();
 
   switch (inp) {
 
-  case NORMAL:
+  case POWERON:
     led_queue->led_state = 1;
     led_queue->duty = 0.5;
     led_queue->period_ms = 1000;
     blink_queue.try_put(led_queue);
     break;
+  case NORMAL:
+    led_queue->led_state = 2;
+    led_queue->duty = 0.5;
+    led_queue->period_ms = 2000;
+    blink_queue.try_put(led_queue);
+    break;
   case NOFILE:
     led_queue->led_state = 2;
     led_queue->duty = 0.5;
-    led_queue->period_ms = 200;
+    led_queue->period_ms = 500;
     blink_queue.try_put(led_queue);
     break;
   default:
@@ -612,9 +636,6 @@ int script_config_process(char cfg_msg[1024], CellularService *_modem) {
   }
 
   debug_if(!match_device, "Not Matched or Authentication fail...\r\n");
-
-  //   return cfg_success;
-  //   return ((cfg_success > 0) && match_device) ? cfg_success : 0;
 
   if (grant_firmware) {
     return ((cfg_success > 0) && match_device) ? cfg_success + 8 : 8;

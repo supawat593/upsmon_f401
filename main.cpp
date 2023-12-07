@@ -23,8 +23,6 @@
 #define LED2 PA_6
 #endif
 
-// #define BLOCKSIZE_4K 4 * 1024
-
 DigitalOut myled(LED1, 1);
 DigitalOut netstat(LED2, 0);
 
@@ -60,12 +58,11 @@ int last_utc_update_stat = 0;
 unsigned int last_rtc_check_NW = 0;
 unsigned int rtc_uptime = 0;
 
-// char xbuffer[BLOCKSIZE_4K];
-
 Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
     capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
-    mdm_notify_thread(osPriorityNormal, 0x0c00, nullptr, "mdm_notify_thread"),
+    modem_notify_thread(osPriorityNormal, 0x0c00, nullptr,
+                        "modem_notify_thread"),
     cellular_thread(osPriorityNormal, 0x1000, nullptr, "cellular_thread");
 
 Thread *usb_thread;
@@ -291,11 +288,11 @@ int main() {
   isr_thread.start(callback(&isr_queue, &EventQueue::dispatch_forever));
   tpl5010.init(&isr_queue);
 
-  blink_thread.start(mbed::callback(blink_routine, &myled));
-  netstat_thread.start(callback(blip_netstat, &netstat));
+  blink_thread.start(mbed::callback(blink_ack_routine, &myled));
+  netstat_thread.start(callback(blink_netstat_routine, &netstat));
 
   if (!ext.get_script_flag()) {
-    blink_led(NOFILE);
+    ack_led_stat(NOFILE);
   }
 
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
@@ -308,7 +305,7 @@ int main() {
   mqtt_obj = new mqttPayload(&init_script, modem);
 
   if (ext.get_script_flag()) {
-    blink_led(NORMAL); //  normal Mode
+    ack_led_stat(NORMAL); //  normal Mode
     set_mdm_busy(false);
   }
 
@@ -316,7 +313,7 @@ int main() {
   capture_thread.start(callback(capture_thread_routine));
 
   backup_script(&init_script);
-  mdm_notify_thread.start(callback(modem_notify_routine, &oob_msg));
+  modem_notify_thread.start(callback(modem_notify_routine, &oob_msg));
 
   while (true) {
 
@@ -483,6 +480,8 @@ void cellular_task() {
         debug("log path %s : size= %d bytes.\r\n", FULL_LOG_FILE_PATH,
               ext.check_filesize(FULL_LOG_FILE_PATH, "r"));
 
+        netstat_led_stat(TRANSMITTING);
+        // netstat
         pub_complete =
             ext.upload_log(modem, FULL_LOG_FILE_PATH, mqtt_obj->mqttpub_topic);
 
@@ -490,6 +489,8 @@ void cellular_task() {
           debug_if(remove(FULL_LOG_FILE_PATH) == 0,
                    "Deleted %s successfully\r\n", FULL_LOG_FILE_PATH);
         }
+        // netstat
+        netstat_led_stat(REGISTERED);
 
         set_mdm_busy(false);
       }
@@ -611,11 +612,12 @@ void mqtt_init(param_mqtt_t *param) {
   sys_time_ms = modem->read_systime_ms();
   modem->ctrl_timer(0);
 
-  modem->check_at_ready() ? netstat_led(IDLE) : netstat_led(OFF);
+  modem->check_at_ready() ? netstat_led_stat(SEARCH)
+                          : netstat_led_stat(POWEROFF);
 
   last_rtc_check_NW = (unsigned int)rtc_read();
   if (ext.get_script_flag() && modem->initial_NW()) {
-    netstat_led(CONNECTED);
+    netstat_led_stat(REGISTERED);
   }
 
   char msg_ati[128] = {0};
@@ -674,7 +676,6 @@ void maintain_connection(param_mqtt_t *param) {
   param->flag_atok = modem->check_modem_status(10);
 
   if (!param->flag_atok) {
-    netstat_led(OFF);
 
     param->rty_at++;
     debug("rty_at=%d\r\n", param->rty_at);
@@ -691,22 +692,24 @@ void maintain_connection(param_mqtt_t *param) {
       vrf_en = 1;
       modem->powerkey_trig_mode();
       reset_mqtt_flag(param);
+      netstat_led_stat(SEARCH);
 
     } else {
       if (mdm_status.read() == 0) {
         modem->MDM_HW_reset();
         reset_mqtt_flag(param);
+        netstat_led_stat(SEARCH);
 
       } else {
+
         vrf_en = 0;
         ThisThread::sleep_for(500ms);
         vrf_en = 1;
         modem->powerkey_trig_mode();
         reset_mqtt_flag(param);
+        netstat_led_stat(SEARCH);
       }
     }
-
-    netstat_led(IDLE);
 
   } else {
     param->rty_at = 0;
@@ -732,7 +735,7 @@ void maintain_connection(param_mqtt_t *param) {
     if (param->flag_attach && (modem->get_creg() == 1)) {
       param->rty_creg = 0;
 
-      netstat_led(CONNECTED);
+      netstat_led_stat(REGISTERED);
       debug_if(modem->get_IPAddr(modem->cell_info.ipaddr), "ipaddr= %s\r\n",
                modem->cell_info.ipaddr);
 
@@ -756,6 +759,8 @@ void maintain_connection(param_mqtt_t *param) {
           vrf_en = 1;
           modem->powerkey_trig_mode();
           reset_mqtt_flag(param);
+          netstat_led_stat(SEARCH);
+
         } else {
           reset_mqtt_flag(param);
           modem->mqtt_disconnect();
@@ -767,7 +772,7 @@ void maintain_connection(param_mqtt_t *param) {
 
         if (param->flag_attach && (modem->get_creg() == 1)) {
 
-          netstat_led(CONNECTED);
+          netstat_led_stat(REGISTERED);
 
           if (modem->dns_resolve(init_script.broker, modem->cell_info.dns_ip) <
               0) {
@@ -806,6 +811,7 @@ void maintain_connection(param_mqtt_t *param) {
         }
       }
     } else {
+
       param->rty_creg++;
 
       if (param->rty_creg > 5) {
@@ -820,18 +826,22 @@ void maintain_connection(param_mqtt_t *param) {
         vrf_en = 1;
         modem->powerkey_trig_mode();
         reset_mqtt_flag(param);
+        netstat_led_stat(SEARCH);
 
       } else {
         if (mdm_status.read() == 0) {
           modem->MDM_HW_reset();
           reset_mqtt_flag(param);
+          netstat_led_stat(SEARCH);
 
         } else {
+
           vrf_en = 0;
           ThisThread::sleep_for(500ms);
           vrf_en = 1;
           modem->powerkey_trig_mode();
           reset_mqtt_flag(param);
+          netstat_led_stat(SEARCH);
         }
       }
     }
