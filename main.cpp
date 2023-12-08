@@ -83,6 +83,9 @@ int len_mqttpayload = 0;
 bool msg_rdy = false;
 
 void cellular_task();
+void connection_init();
+bool instruction_process(char *msg, init_script_t *_script);
+bool intstruction_verify(init_script_t *_script, CellularService *_modem);
 void mqtt_init(param_mqtt_t *param);
 void maintain_connection(param_mqtt_t *param);
 
@@ -458,6 +461,13 @@ void cellular_task() {
 
   unsigned long flags_read = 0;
   printf("Starting cellular_task()        : %p\r\n", ThisThread::get_id());
+  connection_init();
+
+  if (intstruction_verify(&init_script, modem)) {
+    cfg_return_count = 8;
+    set_grant_firmware(true);
+  }
+
   mqtt_init(&param_mqtt);
 
   capture_sem.release();
@@ -606,7 +616,7 @@ void cellular_task() {
   }
 }
 
-void mqtt_init(param_mqtt_t *param) {
+void connection_init() {
 
   vrf_en = 1;
   modem->powerkey_trig_mode(1);
@@ -647,6 +657,150 @@ void mqtt_init(param_mqtt_t *param) {
   }
 
   last_utc_rtc_sync = (int)rtc_read();
+}
+
+bool instruction_process(char *msg, init_script_t *_script) {
+  bool checked = false;
+  if (sscanf(msg, "FirmwareVersion: \"%[^\"]\"", _script->ota_data.version) ==
+      1) {
+    checked = true;
+  } else if (sscanf(msg, "Device: \"%[^\"]\"", _script->ota_data.device) == 1) {
+    checked = true;
+  } else if (sscanf(msg, "DirPath: \"%[^\"]\"", _script->ota_data.dir_path) ==
+             1) {
+    checked = true;
+  } else if (sscanf(msg, "FileSize: \"%d\"", &_script->ota_data.file_length) ==
+             1) {
+    checked = true;
+  } else if (sscanf(msg, "Checksum: \"%d\"", &_script->ota_data.checksum) ==
+             1) {
+    checked = true;
+  } else if (sscanf(msg, "FileName: \"%[^\"]\"", _script->ota_data.filename) ==
+             1) {
+    checked = true;
+  } else {
+    checked = false;
+  }
+  return checked;
+}
+
+bool intstruction_verify(init_script_t *_script, CellularService *_modem) {
+  int len = 0;
+  char fbuffer[512];
+  char file_url[128];
+  char str[512];
+  bool instruction_verified = false;
+
+  if (!_modem->http_start()) {
+    debug("http_start() incomplete!!!\r\n");
+    return false;
+  }
+
+  memset(file_url, 0, 128);
+  strcpy(file_url, _script->url_path);
+  strcat(file_url, "/");
+  strcat(file_url, BASE_INSTRUCTION_PATH);
+
+  debug("url_path : %s\r\nfilename: %s\r\n", _script->url_path,
+        BASE_INSTRUCTION_PATH);
+
+  // modem->http_set_parameter(url_http);
+  _modem->http_set_parameter(file_url);
+
+  if (_modem->http_method_action(&len)) {
+
+    debug("method_action : datalen = % d\r\n ", len);
+
+    debug_if(_modem->http_read_header(fbuffer, &len),
+             "read_header : len = % d\r\n\n<---------- header_buf "
+             "---------->\r\n%s\r\n\n ",
+             len, fbuffer);
+
+    debug_if(_modem->http_getsize_data(&len), "getsize_data datalen=%d\r\n",
+             len);
+
+    if (len > 0) {
+
+      modem->http_read_data(fbuffer, 0, len);
+
+      int st = 0, end = 0;
+      while ((strncmp(&fbuffer[st], "BEGIN:", 6) != 0) && (st < len)) {
+        st++;
+      }
+
+      end = st;
+      while ((strncmp(&fbuffer[end], "END:", 4) != 0) && (end < len)) {
+        end++;
+      }
+
+      if ((st < len) && (end < len)) {
+        memset(str, 0, 512);
+        strncpy(&str[0], &fbuffer[st], end - st + 4);
+
+        const char s[3] = "\r\n";
+        char cut_msg[10][64];
+        // char dummy_filename[32];
+        char *token;
+        int i = 0;
+
+        // strcpy(str, _script->ota_data.filename);
+        /* get the first token */
+        token = strtok(str, s);
+
+        /* walk through other tokens */
+        while (token != NULL) {
+          //   printf(" %s\r\n", token);
+          memset(cut_msg[i], 0, 64);
+          strcpy(cut_msg[i], token);
+          debug("index=%d -> cut_msg : %s\r\n", i, cut_msg[i]);
+          i++;
+          token = strtok(NULL, s);
+        }
+
+        bool device_matched = false;
+        bool version_matched = false;
+        bool file_matched = false;
+        bool temp_bool = true;
+
+        int nvalue = 0;
+        for (int k = 0; k < (i - 2); k++) {
+          file_matched =
+              temp_bool && instruction_process(cut_msg[1 + k], _script);
+          temp_bool = file_matched;
+          nvalue = (file_matched) ? nvalue + 1 : nvalue;
+        }
+
+        device_matched =
+            (strcmp(_script->ota_data.device, (char *)Dev_Group) == 0) ? true
+                                                                       : false;
+        version_matched =
+            (atoi(_script->ota_data.version) - atoi(firmware_vers) > 0) ? true
+                                                                        : false;
+
+        debug_if(device_matched, "\r\nFirmware have matched -> device: %s\r\n",
+                 _script->ota_data.device);
+        debug_if(!device_matched,
+                 "\r\nFirmware have not matched -> device: %s\r\n", Dev_Group);
+
+        debug_if(version_matched,
+                 "new Firmware have found -> version: %s\r\n\n",
+                 _script->ota_data.version);
+        debug_if(!version_matched,
+                 "Device have latest Firmware -> version: %s\r\n\n",
+                 firmware_vers);
+
+        instruction_verified =
+            ((nvalue == 6) && device_matched && version_matched) ? true : false;
+      }
+    }
+  }
+
+  _modem->http_stop();
+
+  return instruction_verified;
+}
+
+void mqtt_init(param_mqtt_t *param) {
 
   param->mqtt_flag.flag_mqtt_start = modem->mqtt_start();
   debug_if(param->mqtt_flag.flag_mqtt_start, "MQTT Started\r\n");

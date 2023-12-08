@@ -296,7 +296,7 @@ bool ExtStorage::process_ota(CellularService *_modem, init_script_t *_script) {
 
   if (i > 1) {
     if (sscanf(cut_msg[i - 1], "%[^.].bin", dummy_filename) == 1) {
-      strcpy(_script->ota_data.dir_path, "/");
+
       strcat(_script->ota_data.dir_path, cut_msg[0]);
 
       if (i > 2) {
@@ -319,6 +319,7 @@ bool ExtStorage::process_ota(CellularService *_modem, init_script_t *_script) {
 
   memset(file_url, 0, 128);
   strcpy(file_url, _script->url_path);
+  strcat(file_url, "/");
   strcat(file_url, _script->ota_data.dir_path);
   strcat(file_url, "/");
   strcat(file_url, _script->ota_data.filename);
