@@ -19,6 +19,8 @@
 #define FLAG_CONNECTION (1UL << 3)
 #define FLAG_FWCHECK (1UL << 4)
 
+#define FLAG_CAPTURE (1UL << 5)
+
 #if TARGET_NUCLEO_F401RE
 #define LED2 PA_6
 #endif
@@ -70,6 +72,8 @@ Thread isr_thread(osPriorityAboveNormal, 0x400, nullptr, "isr_queue_thread");
 
 EventQueue isr_queue;
 EventFlags mdm_evt_flags;
+EventFlags capture_evt_flags;
+LowPowerTicker capture_tick;
 
 Semaphore mdm_sem(1);
 Semaphore capture_sem(1);
@@ -88,6 +92,8 @@ bool instruction_process(char *msg, init_script_t *_script);
 bool intstruction_verify(init_script_t *_script, CellularService *_modem);
 void mqtt_init(param_mqtt_t *param);
 void maintain_connection(param_mqtt_t *param);
+
+void capture_period() { capture_evt_flags.set(FLAG_CAPTURE); }
 
 void reset_mqtt_flag(param_mqtt_t *param) {
   param->mqtt_flag.flag_mqtt_start = false;
@@ -160,7 +166,8 @@ void usb_passthrough() {
 }
 
 void capture_thread_routine() {
-  capture_sem.acquire();
+
+  unsigned long capture_flags_read = 0;
   char ret_rs232[128];
   char str_cmd[6][20];
 
@@ -172,7 +179,6 @@ void capture_thread_routine() {
   //   ptr = strtok(init_script.full_cmd, delim);
   ptr = strtok(full_cmd, delim);
   int n_cmd = 0;
-  Timer duration_tme;
 
   while ((ptr != 0) && (n_cmd < 6)) {
     // strcpy(str_cmd_buff[k], ptr);
@@ -183,77 +189,75 @@ void capture_thread_routine() {
 
   i_cmd = n_cmd;
   printf("---> start Capture Thread <---\r\n");
-  capture_sem.release();
 
   while (true) {
 
-    // printf("*********************************" CRLF);
-    // printf("capture---> timestamp: %d" CRLF, (unsigned int)rtc_read());
-    // printf("*********************************" CRLF);
+    capture_flags_read =
+        capture_evt_flags.wait_any(FLAG_CAPTURE, osWaitForever, false);
 
-    // is_idle_rs232 = false;
-    set_idle_rs232(false);
-    duration_tme.reset();
-    duration_tme.start();
+    switch (capture_flags_read) {
+    case FLAG_CAPTURE:
 
-    for (int j = 0; j < n_cmd; j++) {
-      ThisThread::sleep_for(1s);
-      mail_t *mail = mail_box.try_alloc();
+      set_idle_rs232(false);
 
-      memset(ret_rs232, 0, 128);
-      memset(mail->cmd, 0, 16);
-      memset(mail->resp, 0, 128);
+      for (int j = 0; j < n_cmd; j++) {
+        ThisThread::sleep_for(1s);
+        mail_t *mail = mail_box.try_alloc();
 
-      mail->utc = (unsigned int)rtc_read();
-      strcpy(mail->cmd, str_cmd[j]);
-      xtc232->flush();
+        memset(ret_rs232, 0, 128);
+        memset(mail->cmd, 0, 16);
+        memset(mail->resp, 0, 128);
 
-      debug_if(!xtc232->send(mail->cmd), "command: %s have sent fail\r\n",
-               mail->cmd);
-      read_xparser_to_char(ret_rs232, 128, '\r', xtc232);
+        mail->utc = (unsigned int)rtc_read();
+        strcpy(mail->cmd, str_cmd[j]);
+        xtc232->flush();
 
-      if (strlen(ret_rs232) > 0) {
+        debug_if(!xtc232->send(mail->cmd), "command: %s have sent fail\r\n",
+                 mail->cmd);
+        read_xparser_to_char(ret_rs232, 128, '\r', xtc232);
 
-        strcpy(mail->resp, ret_rs232);
+        if (strlen(ret_rs232) > 0) {
 
-        // <---------- mail for usb return msg ------------->
-        mail_t *xmail = ret_usb_mail.try_alloc();
-        memset(xmail->resp, 0, 128);
-        strcpy(xmail->resp, mail->resp);
+          strcpy(mail->resp, ret_rs232);
 
-        if (get_usb_cnnt()) {
-          // if (is_usb_cnnt) {
-          ret_usb_mail.put(xmail);
+          // <---------- mail for usb return msg ------------->
+          mail_t *xmail = ret_usb_mail.try_alloc();
+          memset(xmail->resp, 0, 128);
+          strcpy(xmail->resp, mail->resp);
+
+          if (get_usb_cnnt()) {
+            // if (is_usb_cnnt) {
+            ret_usb_mail.put(xmail);
+          } else {
+            ret_usb_mail.free(xmail);
+          }
+          // <------------------------------------------------>
+
+          // printf("cmd=%s : ret=%s" CRLF, mail->cmd, mail->resp);
+          mail_box.put(mail);
+
         } else {
-          ret_usb_mail.free(xmail);
+          // debug("command: %s [NO RESP.]\r\n", mail->cmd);
+          // mail_box.free(mail);
+
+          strcpy(mail->resp, "NO_RESP");
+          debug("command: %s [NO_RESP.]\r\n", mail->cmd);
+          mail_box.put(mail);
         }
-        // <------------------------------------------------>
-
-        // printf("cmd=%s : ret=%s" CRLF, mail->cmd, mail->resp);
-        mail_box.put(mail);
-
-      } else {
-        // debug("command: %s [NO RESP.]\r\n", mail->cmd);
-        // mail_box.free(mail);
-
-        strcpy(mail->resp, "NO_RESP");
-        debug("command: %s [NO_RESP.]\r\n", mail->cmd);
-        mail_box.put(mail);
       }
+
+      //   mail_box.put(mail);
+      // is_idle_rs232 = true;
+      set_idle_rs232(true);
+
+      capture_evt_flags.clear(capture_flags_read);
+      break;
+    default:
+      capture_evt_flags.clear(capture_flags_read);
+      break;
     }
 
-    //   mail_box.put(mail);
-    // is_idle_rs232 = true;
-    set_idle_rs232(true);
-
-    period_min = read_dipsw();
-
-    static int cmd_period =
-        duration_cast<chrono::seconds>(duration_tme.elapsed_time()).count();
-    duration_tme.stop();
-
-    // ThisThread::sleep_for(chrono::minutes(period_min));
-    ThisThread::sleep_for(chrono::seconds(60 * period_min - cmd_period));
+    // ThisThread::sleep_for(1000ms);
   }
 }
 
@@ -313,7 +317,15 @@ int main() {
   }
 
   cellular_thread.start(callback(cellular_task));
+
+  capture_sem.acquire();
   capture_thread.start(callback(capture_thread_routine));
+  capture_sem.release();
+
+  ThisThread::sleep_for(500ms);
+  capture_evt_flags.set(FLAG_CAPTURE);
+  capture_tick.attach(callback(capture_period),
+                      chrono::seconds(period_min * 60));
 
   backup_script(&init_script);
   modem_notify_thread.start(callback(modem_notify_routine, &oob_msg));
