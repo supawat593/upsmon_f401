@@ -28,6 +28,16 @@ typedef struct {
   float duty;
 } blink_t;
 
+unsigned int *uid = (unsigned int *)0x801bffc;
+unique_stat_t mydata;
+
+char *get_device_id() {
+  char tmp[12] = {0};
+  sprintf(tmp, "UPS%d", *uid);
+  memcpy(&mydata.uid, &tmp, strlen(tmp));
+  return (char *)&mydata.uid;
+}
+
 class mqttPayload {
 
 public:
@@ -87,11 +97,18 @@ public:
     static char stat_payload[512];
     memset(stat_payload, 0, 512);
 
+    // len = sprintf(stat_payload, stat_pattern, _cell->cell_info.imei,
+    //               (unsigned int)rtc_read(), firmware_vers, Dev_Group,
+    //               period_min, str_stat, _cell->cell_info.sig,
+    //               _cell->cell_info.ber, _cell->cell_info.cops_msg,
+    //               _cell->cell_info.cereg_msg, _cell->cell_info.cpsi_msg);
+
     len = sprintf(stat_payload, stat_pattern, _cell->cell_info.imei,
                   (unsigned int)rtc_read(), firmware_vers, Dev_Group,
-                  period_min, str_stat, _cell->cell_info.sig,
+                  get_device_id(), period_min, str_stat, _cell->cell_info.sig,
                   _cell->cell_info.ber, _cell->cell_info.cops_msg,
                   _cell->cell_info.cereg_msg, _cell->cell_info.cpsi_msg);
+
     memset(mqtt_stat_payload, 0, 512);
     strncpy(mqtt_stat_payload, stat_payload, len);
     return len;
@@ -162,16 +179,6 @@ unsigned int last_rtc_pub = 0;
 Mutex mtx_rtc_msg;
 Mutex mtx_cfgevt;
 Mutex mtx_firware;
-
-unsigned int *uid = (unsigned int *)0x801bffc;
-unique_stat_t mydata;
-
-char *get_device_id() {
-  char tmp[16] = {0};
-  sprintf(tmp, "UPS%d", *uid);
-  memcpy(&mydata.uid, &tmp, strlen(tmp));
-  return (char *)&mydata.uid;
-}
 
 unsigned int get_rtc_pub() {
   unsigned int temp = 0;
@@ -637,10 +644,19 @@ int script_config_process(char cfg_msg[1024], CellularService *_modem) {
 
   debug_if(!match_device, "Not Matched or Authentication fail...\r\n");
 
-  if (grant_firmware) {
-    return ((cfg_success > 0) && match_device) ? cfg_success + 8 : 8;
-  } else {
-    return ((cfg_success > 0) && match_device) ? cfg_success : 0;
+  //   if (grant_firmware) {
+  //     return ((cfg_success > 0) && match_device) ? cfg_success + 8 : 8;
+  //   } else {
+  //     return ((cfg_success > 0) && match_device) ? cfg_success : 0;
+  //   }
+
+  if (match_device) {
+
+    if (grant_firmware) {
+      return (cfg_success > 0) ? cfg_success + 8 : 8;
+    } else {
+      return (cfg_success > 0) ? cfg_success : 0;
+    }
   }
 
   return 0;

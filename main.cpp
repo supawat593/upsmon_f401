@@ -76,7 +76,8 @@ EventFlags capture_evt_flags;
 LowPowerTicker capture_tick;
 
 Semaphore mdm_sem(1);
-Semaphore capture_sem(1);
+// Semaphore capture_sem(2);
+// Mutex capture_mtx;
 
 init_script_t init_script, iap_init_script;
 mqttPayload *mqtt_obj = NULL;
@@ -298,9 +299,9 @@ int main() {
   blink_thread.start(mbed::callback(blink_ack_routine, &myled));
   netstat_thread.start(callback(blink_netstat_routine, &netstat));
 
-  if (!ext.get_script_flag()) {
-    ack_led_stat(NOFILE);
-  }
+  //   if (!ext.get_script_flag()) {
+  //     ack_led_stat(NOFILE);
+  //   }
 
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
   modem = new CellularService(_parser, mdm_pwr, mdm_rst);
@@ -314,15 +315,21 @@ int main() {
   if (ext.get_script_flag()) {
     ack_led_stat(NORMAL); //  normal Mode
     set_mdm_busy(false);
+  } else {
+    ack_led_stat(NOFILE);
   }
 
+  connection_init();
+
   cellular_thread.start(callback(cellular_task));
-
-  capture_sem.acquire();
   capture_thread.start(callback(capture_thread_routine));
-  capture_sem.release();
+  //   capture_mtx.lock();
+  //   capture_sem.acquire();
+  //   capture_thread.start(callback(capture_thread_routine));
+  //   capture_sem.release();
+  //   capture_mtx.unlock();
 
-  ThisThread::sleep_for(500ms);
+  ThisThread::sleep_for(250ms);
   capture_evt_flags.set(FLAG_CAPTURE);
   capture_tick.attach(callback(capture_period),
                       chrono::seconds(period_min * 60));
@@ -469,11 +476,12 @@ void cellular_task() {
   volatile bool verified_firmware = false;
   int cfg_return_count = 0;
 
-  capture_sem.acquire();
+  //   capture_sem.acquire();
+  //   capture_mtx.lock();
 
   unsigned long flags_read = 0;
   printf("Starting cellular_task()        : %p\r\n", ThisThread::get_id());
-  connection_init();
+  //   connection_init();
 
   if (intstruction_verify(&init_script, modem)) {
     cfg_return_count = 8;
@@ -482,7 +490,8 @@ void cellular_task() {
 
   mqtt_init(&param_mqtt);
 
-  capture_sem.release();
+  //   capture_sem.release();
+  //   capture_mtx.unlock();
 
   while (true) {
 

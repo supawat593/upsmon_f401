@@ -63,7 +63,7 @@ typedef struct {
 } oob_notify_t;
 
 typedef struct {
-  unsigned int uid;
+  char uid[12];
   char usr[32];
   char pwd[32];
 } unique_stat_t;
