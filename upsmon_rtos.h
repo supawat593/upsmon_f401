@@ -97,12 +97,6 @@ public:
     static char stat_payload[512];
     memset(stat_payload, 0, 512);
 
-    // len = sprintf(stat_payload, stat_pattern, _cell->cell_info.imei,
-    //               (unsigned int)rtc_read(), firmware_vers, Dev_Group,
-    //               period_min, str_stat, _cell->cell_info.sig,
-    //               _cell->cell_info.ber, _cell->cell_info.cops_msg,
-    //               _cell->cell_info.cereg_msg, _cell->cell_info.cpsi_msg);
-
     len = sprintf(stat_payload, stat_pattern, _cell->cell_info.imei,
                   (unsigned int)rtc_read(), firmware_vers, Dev_Group,
                   get_device_id(), period_min, str_stat, _cell->cell_info.sig,

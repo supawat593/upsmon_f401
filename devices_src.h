@@ -122,12 +122,6 @@ const char payload_pattern[] =
     "{\"imei\":%s,\"utc\":%u,\"model\":\"%s\",\"site_ID\":"
     "\"%s\",\"cmd\":\"%s\",\"resp\":\"%s\"}";
 
-// const char stat_pattern[] =
-//     "{\"imei\":%s,\"utc\":%u,\"firm_vers\":\"%s\",\"dev_group\":"
-//     "\"%s\",\"period_min\":%u,\"stat_mode\":"
-//     "\"%s\",\"csq_stat\":\"+CSQ: "
-//     "%d,%d\",\"cops_opn\":\"%s\",\"reg_stat\":\"%s\",\"ext_stat\":\"%s\"}";
-
 const char stat_pattern[] =
     "{\"imei\":%s,\"utc\":%u,\"firm_vers\":\"%s\",\"dev_group\":"
     "\"%s\",\"uid\":"

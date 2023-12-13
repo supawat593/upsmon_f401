@@ -55,6 +55,8 @@ bool bmqtt_start = false;
 bool bmqtt_cnt = false;
 bool bmqtt_sub = false;
 
+bool first_msg = false;
+
 int last_utc_rtc_sync = 0;
 int last_utc_update_stat = 0;
 unsigned int last_rtc_check_NW = 0;
@@ -63,7 +65,7 @@ unsigned int rtc_uptime = 0;
 Thread blink_thread(osPriorityNormal, 0x100, nullptr, "blink_thread"),
     netstat_thread(osPriorityNormal, 0x100, nullptr, "netstat_thread"),
     capture_thread(osPriorityNormal, 0x500, nullptr, "data_capture_thread"),
-    modem_notify_thread(osPriorityNormal, 0x0c00, nullptr,
+    modem_notify_thread(osPriorityNormal, 0x800, nullptr,
                         "modem_notify_thread"),
     cellular_thread(osPriorityNormal, 0x1000, nullptr, "cellular_thread");
 
@@ -76,8 +78,6 @@ EventFlags capture_evt_flags;
 LowPowerTicker capture_tick;
 
 Semaphore mdm_sem(1);
-// Semaphore capture_sem(2);
-// Mutex capture_mtx;
 
 init_script_t init_script, iap_init_script;
 mqttPayload *mqtt_obj = NULL;
@@ -299,10 +299,6 @@ int main() {
   blink_thread.start(mbed::callback(blink_ack_routine, &myled));
   netstat_thread.start(callback(blink_netstat_routine, &netstat));
 
-  //   if (!ext.get_script_flag()) {
-  //     ack_led_stat(NOFILE);
-  //   }
-
   _parser = new ATCmdParser(&mdm, "\r\n", 256, 8000);
   modem = new CellularService(_parser, mdm_pwr, mdm_rst);
   //   modem = new CellularService(&mdm, mdm_pwr, mdm_rst);
@@ -319,23 +315,18 @@ int main() {
     ack_led_stat(NOFILE);
   }
 
-  connection_init();
-
-  cellular_thread.start(callback(cellular_task));
-  capture_thread.start(callback(capture_thread_routine));
-  //   capture_mtx.lock();
-  //   capture_sem.acquire();
-  //   capture_thread.start(callback(capture_thread_routine));
-  //   capture_sem.release();
-  //   capture_mtx.unlock();
-
-  ThisThread::sleep_for(250ms);
-  capture_evt_flags.set(FLAG_CAPTURE);
-  capture_tick.attach(callback(capture_period),
-                      chrono::seconds(period_min * 60));
-
   backup_script(&init_script);
+  capture_thread.start(callback(capture_thread_routine));
   modem_notify_thread.start(callback(modem_notify_routine, &oob_msg));
+  cellular_thread.start(callback(cellular_task));
+
+  if (!first_msg) {
+    first_msg = true;
+    ThisThread::sleep_for(10s);
+    capture_evt_flags.set(FLAG_CAPTURE);
+    capture_tick.attach(callback(capture_period),
+                        chrono::seconds(period_min * 60));
+  }
 
   while (true) {
 
@@ -476,12 +467,9 @@ void cellular_task() {
   volatile bool verified_firmware = false;
   int cfg_return_count = 0;
 
-  //   capture_sem.acquire();
-  //   capture_mtx.lock();
-
   unsigned long flags_read = 0;
   printf("Starting cellular_task()        : %p\r\n", ThisThread::get_id());
-  //   connection_init();
+  connection_init();
 
   if (intstruction_verify(&init_script, modem)) {
     cfg_return_count = 8;
@@ -489,9 +477,6 @@ void cellular_task() {
   }
 
   mqtt_init(&param_mqtt);
-
-  //   capture_sem.release();
-  //   capture_mtx.unlock();
 
   while (true) {
 
@@ -711,6 +696,7 @@ bool intstruction_verify(init_script_t *_script, CellularService *_modem) {
   char file_url[128];
   char str[512];
   bool instruction_verified = false;
+  bool method_action = false;
 
   if (!_modem->http_start()) {
     debug("http_start() incomplete!!!\r\n");
@@ -727,8 +713,10 @@ bool intstruction_verify(init_script_t *_script, CellularService *_modem) {
 
   // modem->http_set_parameter(url_http);
   _modem->http_set_parameter(file_url);
+  method_action = _modem->http_method_action(&len);
 
-  if (_modem->http_method_action(&len)) {
+  //   if (_modem->http_method_action(&len)) {
+  if (method_action) {
 
     debug("method_action : datalen = % d\r\n ", len);
 
@@ -816,7 +804,8 @@ bool intstruction_verify(init_script_t *_script, CellularService *_modem) {
     }
   }
 
-  _modem->http_stop();
+  //   _modem->http_stop();
+  debug_if(_modem->http_stop(), "http_stop() : complete\r\n");
 
   return instruction_verified;
 }

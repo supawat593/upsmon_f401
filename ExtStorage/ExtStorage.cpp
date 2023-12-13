@@ -258,10 +258,10 @@ bool ExtStorage::upload_log(CellularService *_modem, char full_path[128],
 bool ExtStorage::process_ota(CellularService *_modem, init_script_t *_script) {
 
   int len = 0;
-  char rxbuf[1100];
   char file_url[128];
   char str[128];
   bool ota_complete = false;
+  bool method_action = false;
 
   xbuffer = (char *)malloc(BLOCKSIZE_4K * sizeof(char));
   if (xbuffer == NULL) {
@@ -271,6 +271,7 @@ bool ExtStorage::process_ota(CellularService *_modem, init_script_t *_script) {
 
   if (!_modem->http_start()) {
     debug("http_start() incomplete!!!\r\n");
+    free(xbuffer);
     return false;
   }
 
@@ -286,7 +287,7 @@ bool ExtStorage::process_ota(CellularService *_modem, init_script_t *_script) {
 
   /* walk through other tokens */
   while (token != NULL) {
-    printf(" %s\r\n", token);
+    // printf(" %s\r\n", token);
 
     //      memset(cut_msg[i], 0, 16);
     strcpy(cut_msg[i], token);
@@ -326,15 +327,19 @@ bool ExtStorage::process_ota(CellularService *_modem, init_script_t *_script) {
 
   // modem->http_set_parameter(url_http);
   _modem->http_set_parameter(file_url);
+  method_action = _modem->http_method_action(&len);
 
-  if (_modem->http_method_action(&len)) {
+  //   if (_modem->http_method_action(&len)) {
+  if (method_action) {
 
     debug("method_action : datalen = % d\r\n ", len);
 
-    debug_if(_modem->http_read_header(rxbuf, &len),
+    memset(xbuffer, 0, BLOCKSIZE_4K);
+    debug_if(_modem->http_read_header(xbuffer, &len),
              "read_header : len = % d\r\n\n<---------- header_buf "
              "---------->\r\n%s\r\n\n ",
-             len, rxbuf);
+             len, xbuffer);
+    memset(xbuffer, 0xff, BLOCKSIZE_4K);
 
     debug_if(_modem->http_getsize_data(&len), "getsize_data datalen=%d\r\n",
              len);
@@ -404,9 +409,12 @@ bool ExtStorage::process_ota(CellularService *_modem, init_script_t *_script) {
         file_mtx.unlock();
       }
     }
+
   }
 
-  _modem->http_stop();
+  debug_if(_modem->http_stop(), "http_stop() : complete\r\n");
+  //   _modem->http_stop();
+  free(xbuffer);
 
   return ota_complete;
 }

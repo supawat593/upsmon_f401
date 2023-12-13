@@ -368,8 +368,11 @@ int Sim7600Cellular::get_cgact(int cid) {
 
   sprintf(rcv, "+CGACT: %d", cid);
 
+  _atc->set_timeout(4000);
   _atc->send("AT+CGACT?");
   _atc->read(buff, 128);
+  _atc->set_timeout(8000);
+  _atc->flush();
 
   int st = 0;
   while ((strncmp(&buff[st], rcv, strlen(rcv)) != 0) && (st < 128)) {
@@ -995,17 +998,18 @@ bool Sim7600Cellular::http_method_action(int *datalen, int method) {
 
   bool ret = false;
   int status = -1;
-  //   _atc->set_timeout(30000);
+  _atc->set_timeout(30000);
 
   if (_atc->send("AT+HTTPACTION=%d", method) && _atc->recv("OK") &&
-      _atc->recv("+HTTPACTION : %d,%d,%d\r\n", &method, &status, datalen)) {
+      _atc->recv("+HTTPACTION: %d,%d,%d\r\n", &method, &status, datalen)) {
     debug("http_method_action -> method=%d status=%d datalen=%d\r\n", method,
           status, *datalen);
     ret = (status == 200) ? true : false;
-    return ret;
+    // return ret;
   }
-  debug("http_method_action() : checking pattern fail\r\n");
-  //   _atc->set_timeout(8000);
+  debug_if(status < 0, "http_method_action() : checking pattern fail\r\n");
+  _atc->set_timeout(8000);
+  _atc->flush();
   return ret;
 }
 
