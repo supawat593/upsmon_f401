@@ -37,6 +37,7 @@ private:
   FATFileSystem *fs;
 
   char *xbuffer;
+  //   char xbuffer[0x1000];
   volatile bool is_script_read;
 };
 

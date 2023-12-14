@@ -196,7 +196,7 @@ void ExtStorage::write_data_log(char msg[256], char path[128]) {
     int len = strlen(temp_msg);
     temp_msg[len - 2] = '\0';
 
-    debug_if(len > 0, "<----- Log %s Appending ----->\r\nPayload-> %s\r\n",
+    debug_if(len > 0, "\r\n<----- Log %s Appending ----->\r\nPayload-> %s\r\n",
              path, temp_msg);
   }
 
@@ -409,7 +409,6 @@ bool ExtStorage::process_ota(CellularService *_modem, init_script_t *_script) {
         file_mtx.unlock();
       }
     }
-
   }
 
   debug_if(_modem->http_stop(), "http_stop() : complete\r\n");

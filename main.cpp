@@ -317,16 +317,17 @@ int main() {
 
   backup_script(&init_script);
   capture_thread.start(callback(capture_thread_routine));
-  modem_notify_thread.start(callback(modem_notify_routine, &oob_msg));
-  cellular_thread.start(callback(cellular_task));
 
   if (!first_msg) {
     first_msg = true;
-    ThisThread::sleep_for(10s);
+    ThisThread::sleep_for(1500ms);
     capture_evt_flags.set(FLAG_CAPTURE);
     capture_tick.attach(callback(capture_period),
                         chrono::seconds(period_min * 60));
   }
+
+  modem_notify_thread.start(callback(modem_notify_routine, &oob_msg));
+  cellular_thread.start(callback(cellular_task));
 
   while (true) {
 
@@ -336,23 +337,25 @@ int main() {
 
     if ((usb_det.read() > 0) && (!is_usb_plug)) {
 
-      usb_thread = new Thread(osPriorityNormal, 0x700, nullptr, "usb_thread");
+      usb_thread = new Thread(osPriorityNormal, 0x700, nullptr,
+                              "usb_passthrough_thread");
       usb_thread->start(callback(usb_passthrough));
       is_usb_plug = true;
     }
 
     if ((usb_det.read() < 1) && (is_usb_plug)) {
 
-      debug_if(usb_thread->terminate() == osOK, "usb_thread Terminated\r\n");
+      debug_if(usb_thread->terminate() == osOK,
+               "usb_passthrough_thread Terminated\r\n");
       delete usb_thread;
       is_usb_plug = false;
     }
 
     mail_t *mail = mail_box.try_get_for(Kernel::Clock::duration(500));
     if (mail != nullptr) {
-      printf("utc : %d" CRLF, mail->utc);
-      printf("cmd : %s" CRLF, mail->cmd);
-      printf("resp : %s" CRLF, mail->resp);
+      //   printf("utc : %d" CRLF, mail->utc);
+      //   printf("cmd : %s" CRLF, mail->cmd);
+      //   printf("resp : %s" CRLF, mail->resp);
 
       mqtt_obj->make_mqttPubTopic();
       mqtt_obj->make_mqttPayload(mail);
@@ -437,7 +440,7 @@ int main() {
       if (!get_mdm_busy()) {
 
         if (((unsigned int)rtc_read() - get_rtc_pub()) >
-            ((unsigned int)(0.65 * 60 * period_min))) {
+            ((unsigned int)(0.30 * 60 * period_min))) {
 
           int log_len = ext.check_filesize(FULL_LOG_FILE_PATH, "r");
           if (log_len > ((int)((i_cmd - 0.5) * len_mqttpayload))) {

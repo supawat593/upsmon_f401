@@ -79,6 +79,38 @@ public:
   bool http_getsize_data(int *datalen);
   bool http_read_data(char *rxbuf, int offset, int datalen);
 
+    // FTP
+  int ftp_start();
+  int ftp_stop();
+  bool ftp_set_sockaddr_type(int singleip = 0);
+  // type: 'A' -> ascii , "I" -> binary
+  int ftp_set_transfer_type(char type = 'I');
+  // #ftp_type : 0= ftp srv, 1= explicit ftps srv with ssl,
+  // 2= explicit ftps srv with tls, 3= implicit ftps srv
+  int ftp_login(char srv[128], char usr[32], char pwd[32], int port = 21,
+                int ftp_type = 0);
+  int ftp_login_stat();
+  int ftp_logout();
+  int ftp_get_currentdir(char *dir);
+  int ftp_dir_listfile(char dir[128]);
+  int ftp_changedir(char dir[128]);
+  int ftp_checksize_rmtfile(char rmt_filename[64]);
+  int ftp_delete_rmtfile(char rmt_filename[64]);
+  // #dir_mode : 1= c:/ (local storage) , 2= d:/ (sd card)
+  int ftp_downloadfile_toFS(char filepath[64], int dir_mode = 1);
+
+  // FileSystem
+  int fs_getdir(char *dir);
+  int fs_setdir(char *dir = "C:");
+  // fs_list_currentdir() -> mode : 0 both, 1 subdirectories, 2 files
+  int fs_list_currentdir(int mode = 2);
+  bool fs_deletefile(char filepath[64]);
+  bool fs_renamefile(char old_name[64], char new_name[64]);
+  int fs_get_remainsize();
+  int fs_attributefile(char filepath[64]);
+  //   bool fs_download(char full_fname[128], int offset, int len);
+  bool fs_download(char full_fname[128], char *rcvbuf, int offset, int len);
+
   int read_atc_to_char(char *tbuf, int size, char end);
 
 private:

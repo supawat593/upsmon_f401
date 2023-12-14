@@ -1165,6 +1165,413 @@ bool Sim7600Cellular::http_read_data(char *rxbuf, int offset, int datalen) {
   return ret;
 }
 
+int Sim7600Cellular::ftp_start() {
+  int err = -1;
+
+  if (_atc->send("AT+CFTPSSTART") && _atc->recv("+CFTPSSTART: %d\r\n", &err)) {
+
+    debug_if(err != 0, "ftp start service not complete : err= %d\r\n", err);
+    return err;
+  }
+
+  debug("ftp_start() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::ftp_stop() {
+  int err = -1;
+
+  if (_atc->send("AT+CFTPSSTOP") && _atc->recv("+CFTPSSTOP: %d\r\n", &err)) {
+
+    debug_if(err != 0, "ftp stop service not complete : err= %d\r\n", err);
+    return err;
+  }
+
+  debug("ftp_stop() : pattern check fail\r\n");
+  return -1;
+}
+
+bool Sim7600Cellular::ftp_set_sockaddr_type(int singleip) {
+
+  char cmd[20];
+  sprintf(cmd, "AT+CFTPSSINGLEIP=%d", singleip);
+
+  if (_atc->send(cmd) && _atc->recv("OK")) {
+    return true;
+  }
+  debug("ftp_set_sockaddr_type() : pattern check fail\r\n");
+  return false;
+}
+
+int Sim7600Cellular::ftp_set_transfer_type(char type) {
+  int err = -1;
+  char cmd[20];
+  sprintf(cmd, "AT+CFTPSTYPE=%c", type);
+
+  if (_atc->send(cmd) && _atc->recv("+CFTPSTYPE: %d", &err)) {
+    debug("ftp_set_transfer_type() : err=%d\r\n", err);
+  }
+
+  debug_if(err < 0, "ftp_set_transfer_type() : pattern check fail\r\n");
+  return err;
+}
+
+int Sim7600Cellular::ftp_login(char srv[128], char usr[32], char pwd[32],
+                               int port, int ftp_type) {
+  int err = -1;
+  char cmd[128];
+  sprintf(cmd, "AT+CFTPSLOGIN=\"%s\",%d,\"%s\",\"%s\",%d", srv, port, usr, pwd,
+          ftp_type);
+
+  //   printf("ftp_login cmd= %s\r\n", cmd);
+
+  if (_atc->send(cmd) && _atc->recv("+CFTPSLOGIN: %d\r\n", &err)) {
+
+    debug_if(err != 0, "ftp login not complete : err= %d\r\n", err);
+    return err;
+  }
+
+  debug("ftp_login() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::ftp_login_stat() {
+  int stat = -1;
+
+  if (_atc->send("AT+CFTPSLOGIN?") &&
+      _atc->recv("+CFTPSLOGIN: %d\r\n", &stat)) {
+
+    debug_if(stat != 1, "ftp not logged in\r\n");
+    return stat;
+  }
+
+  debug("ftp_login_stat() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::ftp_logout() {
+  int err = -1;
+
+  if (_atc->send("AT+CFTPSLOGOUT") &&
+      _atc->recv("+CFTPSLOGOUT: %d\r\n", &err)) {
+
+    debug_if(err != 0, "ftp logout not complete : err= %d\r\n", err);
+    return err;
+  }
+
+  debug("ftp_logout() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::ftp_get_currentdir(char *dir) {
+  int err = -1;
+  char ret[128];
+  char rcv[128];
+  char short_dir[128];
+
+  if (_atc->send("AT+CFTPSPWD") && _atc->recv("OK") &&
+      _atc->recv("+CFTPSPWD: %[^\r]\r\n", ret)) {
+
+    // debug("ret=%s\r\n", ret);
+    sprintf(rcv, "+CFTPSPWD: %s", ret);
+
+    if (sscanf(rcv, "+CFTPSPWD: \"%[^\"]\"", short_dir) == 1) {
+      strcpy(dir, short_dir);
+      //   printf("current ftp remote_dir to %s\r\n", short_dir);
+      err = 0;
+    } else if (sscanf(rcv, "+CFTPSPWD: %d", &err) == 1) {
+      //   printf("get current ftp remote_dir : err= %d\r\n", err);
+    } else {
+      // blank
+    }
+
+    debug_if(err >= 0, "get current remote dir : err= %d\r\n", err);
+    return err;
+  }
+
+  debug("get current remote dir not complete : pattern checking fail\r\n");
+  return err;
+}
+
+int Sim7600Cellular::ftp_dir_listfile(char dir[128]) {
+  int err = -1;
+  char cmd[128];
+  sprintf(cmd, "AT+CFTPSLIST=\"%s\"", dir);
+
+  _atc->set_timeout(12000);
+
+  if (_atc->send(cmd) && _atc->recv("OK") &&
+      _atc->recv("+CFTPSLIST: %d\r\n", &err)) {
+    printf("ftp listfile remote_dir %s : err= %d\r\n", dir, err);
+  }
+
+  _atc->set_timeout(8000);
+  _atc->flush();
+
+  debug_if(err < 0,
+           "get current remote dir not complete : pattern checking fail\r\n");
+  return err;
+}
+
+int Sim7600Cellular::ftp_changedir(char dir[128]) {
+  int err = -1;
+  char cmd[150];
+  sprintf(cmd, "AT+CFTPSCWD=\"%s\"", dir);
+
+  if (_atc->send(cmd) && _atc->recv("+CFTPSCWD: %d\r\n", &err)) {
+    printf("change ftp remote_dir to %s\r\n", dir);
+    debug_if(err != 0, "ftp changedir not complete : err= %d\r\n", err);
+    return err;
+  }
+
+  debug("ftp_changedir() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::ftp_checksize_rmtfile(char rmt_filename[64]) {
+  int len = -1;
+  char cmd[150];
+  sprintf(cmd, "AT+CFTPSSIZE=\"%s\"", rmt_filename);
+
+  if (_atc->send(cmd) && _atc->recv("OK") &&
+      _atc->recv("+CFTPSSIZE: %d\r\n", &len)) {
+  }
+
+  debug_if(len < 0, "ftp_checksize_rmtfile() : pattern check fail\r\n");
+  return len;
+}
+
+int Sim7600Cellular::ftp_delete_rmtfile(char rmt_filename[64]) {
+  int err = -1;
+  char cmd[150];
+  sprintf(cmd, "AT+CFTPSDELE=\"%s\"", rmt_filename);
+
+  if (_atc->send(cmd) && _atc->recv("+CFTPSDELE: %d\r\n", &err)) {
+    printf("delete ftp remote_file %s\r\n", rmt_filename);
+    debug_if(err != 0, "ftp_delete_rmtfile not complete : err= %d\r\n", err);
+    return err;
+  }
+
+  debug("ftp_delete_rmtfile() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::ftp_downloadfile_toFS(char filepath[64], int dir_mode) {
+  int err = -1;
+  char cmd[128];
+  sprintf(cmd, "AT+CFTPSGETFILE=\"%s\",%d", filepath, dir_mode);
+
+  if (_atc->send(cmd) && _atc->recv("+CFTPSGETFILE: %d\r\n", &err)) {
+    // printf("download ftp remote_file %s to FS Module\r\n", filepath);
+    debug_if(err != 0, "ftp_downloadfile_toFS not complete : err= %d\r\n", err);
+    return err;
+  }
+
+  debug("ftp_downloadfile_toFS() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::fs_getdir(char *dir) {
+
+  char ret[64];
+
+  if (_atc->send("AT+FSCD?") && _atc->recv("+FSCD: %[^\n]\r\n", ret)) {
+    // debug("ret=%s\r\n", ret);
+    memset(dir, 0, 64);
+    strcpy(dir, ret);
+    return 0;
+  }
+
+  debug("fs_getdir() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::fs_setdir(char *dir) {
+
+  char cmd[128];
+
+  int len = strlen(dir);
+  if ((dir[len - 1] == '/') || (dir[len - 1] == '\\')) {
+    dir[len - 1] = '\0';
+  }
+
+  sprintf(cmd, "AT+FSCD=%s", dir);
+  //   printf("cmd: %s\r\n", cmd);
+
+  if (_atc->send(cmd) && _atc->recv("OK")) {
+
+    return 0;
+  }
+
+  debug("fs_setdir() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::fs_list_currentdir(int mode) {
+
+  char type[32];
+
+  if (_atc->send("AT+FSLS=%d", mode) && _atc->recv("+FSLS: %[^\n]\r\n", type) &&
+      _atc->recv("OK")) {
+    debug("fs_list mode= %s\r\n", type);
+    return 0;
+  }
+
+  debug("fs_list_currentdir() : pattern check fail\r\n");
+  return -1;
+}
+
+bool Sim7600Cellular::fs_deletefile(char filepath[64]) {
+
+  char cmd[128];
+
+  sprintf(cmd, "AT+FSDEL=%s", filepath);
+
+  if (_atc->send(cmd) && _atc->recv("OK")) {
+
+    return 0;
+  }
+
+  debug("fs_deletefile() : pattern check fail\r\n");
+  return false;
+}
+
+bool Sim7600Cellular::fs_renamefile(char old_name[64], char new_name[64]) {
+
+  char cmd[128];
+
+  sprintf(cmd, "AT+FSRENAME=%s,%s", old_name, new_name);
+
+  if (_atc->send(cmd) && _atc->recv("OK")) {
+
+    return 0;
+  }
+
+  debug("fs_renamefile() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::fs_get_remainsize() {
+
+  char dir[6];
+  int totalsize, usedsize;
+
+  if (_atc->send("AT+FSMEM") &&
+      _atc->recv("+FSMEM: %[^(](%d,%d)", dir, &totalsize, &usedsize)) {
+    debug("storage %s total/used -> (%d,%d) bytes.\r\n", dir, totalsize,
+          usedsize);
+    return totalsize - usedsize;
+  }
+
+  debug("fs_get_remainsize() : pattern check fail\r\n");
+  return -1;
+}
+
+int Sim7600Cellular::fs_attributefile(char filepath[64]) {
+
+  int len = -1;
+  char cmd[128];
+
+  sprintf(cmd, "AT+FSATTRI=%s", filepath);
+  //   printf("cmd= %s\r\n", cmd);
+
+  if (_atc->send(cmd) && _atc->recv("+FSATTRI: %d\r\n", &len)) {
+
+    debug_if(len > 0, "len of file %s = %d bytes.\r\n", filepath, len);
+    return len;
+  }
+
+  debug("fs_attributefile() : pattern check fail\r\n");
+  return -1;
+}
+
+bool Sim7600Cellular::fs_download(char full_fname[128], char *rcvbuf,
+                                  int offset, int len) {
+
+  char cmd[128];
+  bool tail_detect = false;
+  //   char sub_part[512];
+
+  int npart = 0;
+  int last_part_size = 0;
+  int part_size = 0;
+
+  memset(buf, 0xff, 0x10e0);
+  //   int dummy_len = len + 2;
+
+  sprintf(cmd, "AT+CFTRANTX=\"%s\",%d,%d", full_fname, offset, len);
+
+  _atc->set_timeout(3000);
+  _atc->send(cmd) && _atc->recv("+CFTRANTX");
+
+  _atc->read(buf, 0x10e0);
+  printf("fs_download() -> fname = %s offset =0x%06X len =%d Bytes.\r\n",
+         full_fname, offset, len);
+
+  _atc->set_timeout(8000);
+  _atc->flush();
+
+  int k = 0;
+  while ((memcmp(&buf[k], "+CFTRANTX: 0", 12) != 0) && (k < len)) {
+    k++;
+  }
+
+  tail_detect = (k < len) ? true : false;
+
+  part_size = (1 << 9);
+  last_part_size = len & ((1 << 9) - 1);
+  npart = len >> 9;
+
+  if (last_part_size > 0) {
+    npart += 1;
+  }
+
+  const char s[3] = ": ";
+  int i = 0;
+  int index = 0;
+  int start_offset = 0;
+
+  //   while ((i < len) && (index < 8)) {
+  while ((i < k) && (index < 8)) {
+
+    if (memcmp(&buf[i], s, 2) == 0) {
+
+      //   if (last_part_size > 0) {
+      //     //   num += 1;
+
+      //     if (index == (npart - 1)) {
+      //       part_size = last_part_size;
+      //     }
+      //   }
+
+      if ((index == (npart - 1)) && (last_part_size > 0)) {
+        part_size = last_part_size;
+      }
+
+      if (buf[i + 8] == 0x0d) {
+        memcpy(&rcvbuf[index << 9], &buf[i + 10], part_size);
+      } else if (buf[i + 9] == 0x0d) {
+        memcpy(&rcvbuf[index << 9], &buf[i + 11], part_size);
+      } else if (buf[i + 10] == 0x0d) {
+        memcpy(&rcvbuf[index << 9], &buf[i + 12], part_size);
+      } else {
+        // blank
+      }
+
+      debug("sub part %d\r\n", index);
+
+      start_offset = index << 9;
+      printHEX((unsigned char *)&rcvbuf[start_offset], part_size);
+
+      index++;
+    }
+
+    i++;
+  }
+
+  return tail_detect;
+}
+
 int Sim7600Cellular::read_atc_to_char(char *tbuf, int size, char end) {
   int count = 0;
   int x = 0;
